@@ -26,3 +26,14 @@ def test_all_records():
     recs = s.all_records()
     assert len(recs) == 1
     assert recs[0]['direction'] == 'to_station'
+
+
+def test_taxi_share_logic():
+    from shuttle_system.agents.notify_agent import taxi_share_logic
+    s = MemoryReservationStore()
+    s.add('A', 'to_station', '13:58', '2026-06-05')
+    s.add('B', 'to_station', '13:58', '2026-06-05')
+    r = taxi_share_logic(s, 'to_station', '13:58', '2026-06-05', exclude_name='A')
+    assert r['group_size'] == 2          # B + 본인
+    assert 'B' in r['companions']
+    assert r['per_person_krw'] == 7000
