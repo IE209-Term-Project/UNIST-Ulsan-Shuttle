@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+shuttle_data.json
+*.png
+.DS_Store
