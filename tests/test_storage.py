@@ -1,4 +1,5 @@
-from shuttle_system.storage import MemoryReservationStore
+import os
+from shuttle_system.storage import MemoryReservationStore, make_store
 
 
 def test_add_and_count():
@@ -37,3 +38,9 @@ def test_taxi_share_logic():
     assert r['group_size'] == 2          # B + 본인
     assert 'B' in r['companions']
     assert r['per_person_krw'] == 7000
+
+
+def test_make_store_local_fallback(monkeypatch):
+    # 서비스 계정 키 없음 + Colab 아님 -> 메모리 저장소로 폴백
+    monkeypatch.delenv('GOOGLE_SERVICE_ACCOUNT_JSON', raising=False)
+    assert isinstance(make_store(), MemoryReservationStore)
