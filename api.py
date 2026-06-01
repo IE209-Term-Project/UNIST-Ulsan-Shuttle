@@ -28,6 +28,22 @@ store = make_store()
 FARE = POLICY_FARE
 WEB = Path(__file__).parent / 'web'
 
+# Orchestrator(LLM planner) — 키 없으면 None → 결정론 경로로 폴백
+try:
+    from shuttle_system.agents.orchestrator import Orchestrator
+    orchestrator = Orchestrator(store, fare=FARE, pusher=kakao_send)
+except Exception:
+    orchestrator = None
+
+# 에이전트 trace를 사람이 읽을 라벨로
+TRACE_LABEL = {
+    'recommend_transport': '추천 에이전트',
+    'detect_and_notify': '알림 에이전트',
+    'form_carpool': '카풀 에이전트',
+    'fallback:recommend': '추천 에이전트(결정론)',
+    'fallback:detect_and_notify': '알림 에이전트(결정론)',
+}
+
 
 def _today():
     return datetime.now().strftime('%Y-%m-%d')
@@ -74,14 +90,29 @@ class ReserveReq(StatusReq):
 @app.post('/api/reserve')
 def api_reserve(req: ReserveReq):
     date = (req.travel_date or '').strip() or _today()
+    if orchestrator is not None:
+        # Orchestrator(LLM planner)가 어떤 하위 에이전트를 부를지 판단 → 예약 처리
+        before = len(store.all_notifications())
+        res = orchestrator.handle(req.name, req.direction, req.mode,
+                                  _opt_time(req.train_time), req.desire_time, date, intent='reserve')
+        if not res.get('ok'):
+            return JSONResponse({'ok': False, 'info': res.get('info', '입력 확인')}, status_code=400)
+        ktx, date = res['ktx_time'], res['travel_date']
+        run_notification_check(store, fare=FARE, pusher=kakao_send)   # 알림 보장(중복 차단)
+        new_msgs = [n.get('message', '') for n in store.all_notifications()[before:]]
+        st = slot_status(store, req.direction, ktx, date, FARE)
+        trace = [TRACE_LABEL.get(t, t) for t in res.get('trace', [])]
+        return {'ok': True, 'ktx_time': ktx, 'travel_date': date, 'info': res.get('info', ''),
+                'message': res['message'], 'trace': trace, 'new_alerts': new_msgs, **st}
+    # 폴백: orchestrator 불가 → 결정론
     ktx, info = resolve_ktx(store, req.direction, req.mode,
                             _opt_time(req.train_time), req.desire_time, date, FARE)
     if ktx is None:
         return JSONResponse({'ok': False, 'info': info}, status_code=400)
     rec = recommend(store, req.name, req.direction, ktx, date, FARE)
-    # 예약 직후 능동 감지 + 카톡 발송
     new = run_notification_check(store, fare=FARE, pusher=kakao_send)
     return {'ok': True, 'ktx_time': ktx, 'info': info, 'travel_date': date,
+            'trace': ['추천 에이전트(결정론)', '알림 에이전트(결정론)'],
             'new_alerts': [n['message'] for n in new], **rec}
 
 

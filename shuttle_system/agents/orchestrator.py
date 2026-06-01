@@ -14,7 +14,6 @@ from openai import OpenAI
 
 from shuttle_system.config import get_secret
 from shuttle_system.core.optimization import POLICY_FARE, breakeven_N
-from shuttle_system.agents.notify_agent import NotifyAgent, StudentProfile
 from shuttle_system.agents.alert_agent import run_notification_check
 from shuttle_system.agents.carpool_agent import form_carpool_groups, group_message
 from shuttle_system.recommend import recommend, resolve_ktx, weekday_of
@@ -27,21 +26,16 @@ class Orchestrator:
         self.store = store
         self.fare = fare
         self.pusher = pusher          # 외부 발송(예: kakao). alert 도구가 사용.
-        self.notify = NotifyAgent(store, fare)
         self.client = OpenAI(api_key=get_secret('OPENAI_API_KEY'))
         self.trace = []               # 어떤 하위 에이전트를 어떤 순서로 불렀는지 기록
 
     # ── 하위 에이전트 = 도구 ─────────────────────────────
     def _build_tools(self):
         return {
-            # 추천 전담: NotifyAgent (그 안에서 셔틀→513→택시 + 예약 수행)
-            'recommend_transport': lambda name, direction, ktx_time, travel_date, allow_booking=False: (
-                self.notify.generate(
-                    StudentProfile(name=name, direction=direction, ktx_time=ktx_time,
-                                   travel_date=travel_date,
-                                   current_reservations=self.store.count(direction, ktx_time, travel_date)),
-                    allow_booking=allow_booking)
-            ),
+            # 추천 전담: 결정론 recommend (셔틀→513→택시/카풀 판단 + 예약). LLM 미사용 → 빠르고 일관적.
+            'recommend_transport': lambda name, direction, ktx_time, travel_date, allow_booking=False:
+                recommend(self.store, name, direction, ktx_time, travel_date, self.fare,
+                          do_book=allow_booking)['message'],
             # 능동 감지: AlertAgent (dispatch/carpool/delay 이벤트 → 알림 생성·발송)
             'detect_and_notify': lambda: json.dumps(
                 [n['message'] for n in run_notification_check(

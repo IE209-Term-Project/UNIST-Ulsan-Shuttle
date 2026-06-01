@@ -91,6 +91,7 @@
       </div>
     </div>
     <div id="result" class="hidden mt-5 rounded-2xl bg-blue-50 text-blue-900 p-4 text-[15px] leading-relaxed"></div>
+    <div id="trace" class="hidden mt-3 text-sm text-gray-500"></div>
   </section>
 
   <!-- Live 513 -->
@@ -223,6 +224,9 @@ async function reserve() {
   const d = await post('/api/reserve', payload());
   if (!d.ok) return toast('⚠️ ' + d.info);
   show('result', d.message);
+  if (d.trace && d.trace.length) {
+    show('trace', '🤖 처리 과정: ' + d.trace.map((t,i)=>`${i+1}. ${t}`).join('  →  '));
+  }
   (d.new_alerts||[]).forEach(m => toast('🔔 ' + m));
   refreshFeed(); loadPlan();
 }
