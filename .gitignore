@@ -8,3 +8,4 @@ shuttle_data.json
 .env
 service_account.json
 *.json.key
+shuttle_system.zip
