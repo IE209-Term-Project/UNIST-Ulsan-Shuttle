@@ -130,7 +130,7 @@
   <!-- Alerts -->
   <section id="alerts" class="bg-white rounded-3xl p-7 card">
     <div class="flex items-center justify-between mb-3">
-      <h2 class="text-xl font-semibold">🔔 실시간 알림</h2>
+      <h2 class="text-xl font-semibold">🔔 내 알림</h2>
       <button onclick="checkAlerts()" class="text-sm text-blue-600 font-medium hover:underline">지금 체크</button>
     </div>
     <button onclick="simDelay()" class="w-full mb-4 rounded-2xl py-2.5 text-sm font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 transition">⚠️ 지연 시뮬레이션 (데모)</button>
@@ -243,11 +243,12 @@ async function checkAlerts() { const d = await post('/api/notify/check'); d.new?
 async function simDelay() { const d = await post('/api/notify/delay'); d.new?.forEach(m=>toast('🔔 '+m)); refreshFeed(); }
 async function pollAlerts() { const d = await post('/api/notify/check'); if (d.new?.length) d.new.forEach(m=>toast('🔔 '+m)); refreshFeed(); }
 async function refreshFeed() {
-  const d = await (await fetch('/api/notifications')).json();
+  const nm = encodeURIComponent(($('name').value||'').trim());
+  const d = await (await fetch('/api/notifications?name=' + nm)).json();
   const ul = $('feed');
   ul.innerHTML = (d.notifications||[]).length
     ? d.notifications.map(m=>`<li class="border-b border-gray-100 pb-2">${m}</li>`).join('')
-    : '<li class="text-gray-400">알림 없음</li>';
+    : '<li class="text-gray-400">내 알림 없음 (예약 후 확정·지연 시 표시)</li>';
 }
 function show(id, html) { const e=$(id); e.innerHTML=html; e.classList.remove('hidden'); }
 init();

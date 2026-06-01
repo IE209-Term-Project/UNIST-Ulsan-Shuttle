@@ -148,8 +148,15 @@ def api_carpool_finalize():
 
 # ── 알림 ─────────────────────────────────────────────
 @app.get('/api/notifications')
-def api_notifications():
+def api_notifications(name: str = None):
+    """내 알림: 이름이 주어지면 그 사람이 예약한 슬롯의 알림만."""
     notes = store.all_notifications()
+    if name and name.strip():
+        mine = {(str(r.get('direction')), str(r.get('ktx_time')), str(r.get('travel_date')))
+                for r in store.all_records() if str(r.get('name')) == name.strip()}
+        notes = [n for n in notes
+                 if (str(n.get('direction')), str(n.get('ktx_time')),
+                     str(n.get('travel_date'))) in mine]
     return {'notifications': [n.get('message', '') for n in notes[-12:][::-1]]}
 
 
@@ -185,40 +192,44 @@ def api_plan(date: str = None):
         wd = weekday_of(date)
     except ValueError:
         return JSONResponse({'ok': False, 'info': '날짜 형식 오류'}, status_code=400)
-    from shuttle_system.core.schedule import SHUTTLE_FIXED, shuttle_time_for
-    n_star = breakeven_N(FARE)
+    from shuttle_system.core.schedule import daily_dispatch
+    disp = daily_dispatch(store, date, FARE)
+    n_star = disp['n_star']
     shuttles = []
     seen = set()
-    # 1) 고정 피크 (해당 요일, 항상 운행)
-    for direction, entries in SHUTTLE_FIXED.items():
-        for e in entries:
-            if e['wd'] != wd:
-                continue
-            count = store.count(direction, e['ktx'], date)
-            seen.add((direction, e['ktx']))
-            shuttles.append({
-                'slot': e['slot'], 'direction': direction,
-                'dir_kr': '울산역행' if direction == 'to_station' else '캠퍼스행',
-                'shuttle_time': e['shuttle'], 'ktx': e['ktx'], 'service': 'fixed',
-                'status': '운행 확정 (고정)', 'run': True, 'count': count})
-    # 2) 조건부: 그 날짜에 예약이 있는 시각 (수요 모이는 중)
-    groups = {}
-    for r in store.all_records():
-        if str(r.get('travel_date')) != date:
-            continue
-        groups[(str(r.get('direction')), str(r.get('ktx_time')))] = \
-            groups.get((str(r.get('direction')), str(r.get('ktx_time'))), 0) + 1
-    for (direction, ktx), count in groups.items():
-        if (direction, ktx) in seen:
-            continue
-        run = count >= n_star
+
+    def _dir_kr(d):
+        return '울산역행' if d == 'to_station' else '캠퍼스행'
+
+    # 확정된 운행 (고정 + 단일버스 가능 조건부)
+    for c in disp['confirmed']:
+        seen.add((c['direction'], c['ktx']))
         shuttles.append({
-            'slot': f'{ktx} 조건부', 'direction': direction,
-            'dir_kr': '울산역행' if direction == 'to_station' else '캠퍼스행',
-            'shuttle_time': shuttle_time_for(direction, ktx), 'ktx': ktx,
-            'service': 'conditional',
-            'status': (f'운행 확정 ({count}/{n_star}명)' if run else f'모집 중 ({count}/{n_star}명)'),
-            'run': run, 'count': count})
+            'slot': c['slot'], 'direction': c['direction'], 'dir_kr': _dir_kr(c['direction']),
+            'shuttle_time': c['shuttle_time'], 'ktx': c['ktx'], 'service': c['service'],
+            'status': '운행 확정 (고정)' if c['service'] == 'fixed' else f"운행 확정 ({c['count']}/{n_star}명)",
+            'run': True, 'count': c['count']})
+    # 수요는 찼으나 버스 한 대 제약으로 밀린 운행
+    for c in disp['bumped']:
+        seen.add((c['direction'], c['ktx']))
+        shuttles.append({
+            'slot': c['slot'], 'direction': c['direction'], 'dir_kr': _dir_kr(c['direction']),
+            'shuttle_time': c['shuttle_time'], 'ktx': c['ktx'], 'service': 'conditional',
+            'status': f"미운행 ({c['reason']}) → 카풀/513", 'run': False, 'count': c['count']})
+    # 아직 모집 중(N* 미달) 조건부
+    counts = {}
+    for r in store.all_records():
+        if str(r.get('travel_date')) == date:
+            k = (str(r.get('direction')), str(r.get('ktx_time')))
+            counts[k] = counts.get(k, 0) + 1
+    from shuttle_system.core.schedule import shuttle_time_for
+    for (direction, ktx), count in counts.items():
+        if (direction, ktx) in seen or count >= n_star:
+            continue
+        shuttles.append({
+            'slot': f'{ktx} 조건부', 'direction': direction, 'dir_kr': _dir_kr(direction),
+            'shuttle_time': shuttle_time_for(direction, ktx), 'ktx': ktx, 'service': 'conditional',
+            'status': f'모집 중 ({count}/{n_star}명)', 'run': False, 'count': count})
     shuttles.sort(key=lambda s: s['shuttle_time'])
     return {'ok': True, 'date': date, 'weekday': WEEKDAY_KR[wd] + '요일',
             'n_star': n_star, 'shuttles': shuttles}

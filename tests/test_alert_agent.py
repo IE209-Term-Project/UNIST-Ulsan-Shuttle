@@ -18,16 +18,15 @@ def test_dispatch_event_when_conditional_crosses_nstar():
     assert 'carpool' not in types   # 운행하므로 카풀 아님
 
 
-def test_carpool_event_when_below_nstar():
+def test_no_broadcast_below_nstar():
     s = MemoryReservationStore()
-    # 목 13:58 조건부, 3명 (<8) 이고 2명 이상 -> 카풀
+    # 목 13:56 조건부 3명 (<8) -> 확정 알림 없음, 카풀 방송 알림도 없음(스팸 제거)
     _seed(s, 'to_station', '13:56', '2026-06-04', 3)
     evs = detect_events(s, fare=2000)
-    assert any(e['type'] == 'carpool' for e in evs)
-    assert not any(e['type'] == 'dispatch' for e in evs)
+    assert evs == []
 
 
-def test_no_carpool_for_single_reserver():
+def test_no_event_for_single_reserver():
     s = MemoryReservationStore()
     _seed(s, 'to_station', '13:56', '2026-06-04', 1)
     assert detect_events(s, fare=2000) == []

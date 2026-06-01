@@ -35,18 +35,11 @@ def detect_events(store, fare=POLICY_FARE, simulate_delay=False):
         except ValueError:
             continue
         slot = find_shuttle_slot(direction, ktx, wd, reservations=count, fare=fare)
-        running = (slot['service'] == 'fixed'
-                   or (slot['service'] == 'conditional' and count >= n_star))
+        # 개인 알림: 내가 예약한 조건부 슬롯이 N* 충족 → 운행 확정 (카풀 '방송'은 알림에서 제외)
         if slot['service'] == 'conditional' and count >= n_star:
             events.append({'type': 'dispatch', 'direction': direction, 'ktx_time': ktx,
                            'travel_date': date, 'slot': slot.get('slot', ''), 'count': count,
                            'n_star': n_star, 'shuttle_time': slot.get('shuttle_time', '')})
-        if not running and count >= 2:
-            from shuttle_system.agents.carpool_agent import fare_for_time, TAXI_CAPACITY
-            group = min(count, TAXI_CAPACITY)
-            events.append({'type': 'carpool', 'direction': direction, 'ktx_time': ktx,
-                           'travel_date': date, 'count': count,
-                           'per_person': round(fare_for_time(ktx) / group)})
     if simulate_delay and groups:
         (direction, ktx, date), count = next(iter(groups.items()))
         events.append({'type': 'delay', 'direction': direction, 'ktx_time': ktx,

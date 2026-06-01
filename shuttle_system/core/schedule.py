@@ -118,6 +118,61 @@ def find_shuttle_near(direction, desired_time, weekday, window_min=30, fare=POLI
     return best
 
 
+TURNAROUND_MIN = 50   # 한 운행 점유(왕복 40 + 정비/대기). 다음 운행은 이만큼 떨어져야
+MAX_RUNS_PER_DAY = 6  # 기사 근로시간 상 하루 최대 운행 횟수
+
+
+def _wd_of_date(date):
+    from datetime import datetime
+    return datetime.strptime(date.strip(), '%Y-%m-%d').weekday()
+
+
+def daily_dispatch(store, date, fare=POLICY_FARE,
+                   turnaround_min=TURNAROUND_MIN, max_runs=MAX_RUNS_PER_DAY):
+    """버스 1대 기준 하루 실제 운행 스케줄 결정.
+
+    고정편 = 항상 운행(커밋). 조건부 = N* 충족분을 수요 많은 순으로,
+    이미 확정된 운행과 turnaround_min 내 겹치지 않고 일 최대 max_runs 안에서 선택.
+    반환: {confirmed:[...], bumped:[...]} (bumped = 수요는 찼으나 차량 제약으로 미운행).
+    """
+    wd = _wd_of_date(date)
+    n_star = breakeven_N(fare)
+
+    confirmed = []
+    for direction, entries in SHUTTLE_FIXED.items():
+        for e in entries:
+            if e['wd'] == wd:
+                confirmed.append({'service': 'fixed', 'direction': direction, 'slot': e['slot'],
+                                  'shuttle_time': e['shuttle'], 'ktx': e['ktx'],
+                                  'count': store.count(direction, e['ktx'], date)})
+    fixed_keys = {(c['direction'], c['ktx']) for c in confirmed}
+
+    counts = {}
+    for r in store.all_records():
+        if str(r.get('travel_date')) == date:
+            k = (str(r.get('direction')), str(r.get('ktx_time')))
+            counts[k] = counts.get(k, 0) + 1
+    cands = [{'service': 'conditional', 'direction': d, 'slot': f'{k} 조건부',
+              'shuttle_time': shuttle_time_for(d, k), 'ktx': k, 'count': c}
+             for (d, k), c in counts.items()
+             if (d, k) not in fixed_keys and c >= n_star]
+    cands.sort(key=lambda c: (-c['count'], c['shuttle_time']))   # 수요 많은 순(=순편익 큰 순)
+
+    bumped = []
+    for c in cands:
+        if len(confirmed) >= max_runs:
+            bumped.append({**c, 'reason': '일 최대 운행 초과'})
+            continue
+        if any(abs(_to_min(c['shuttle_time']) - _to_min(x['shuttle_time'])) < turnaround_min
+               for x in confirmed):
+            bumped.append({**c, 'reason': '다른 운행과 시간 겹침'})
+            continue
+        confirmed.append(c)
+    confirmed.sort(key=lambda c: c['shuttle_time'])
+    return {'date': date, 'n_star': n_star, 'confirmed': confirmed, 'bumped': bumped,
+            'turnaround_min': turnaround_min, 'max_runs': max_runs}
+
+
 def all_slots():
     """리포트용: (service, direction, slot dict) 전체 평탄화."""
     out = []
