@@ -34,6 +34,32 @@ def taxi_share_logic(store, direction, ktx_time, travel_date, exclude_name=None)
             'note': f'같은 {ktx_time} KTX 예약자 {len(names)}명 → {n}명 셰어 시 1인 약 {per_person}원'}
 
 
+def _do_reserve(store, name, direction, ktx_time, travel_date):
+    """행동: 실제 예약을 저장소에 기록."""
+    store.add(name, direction, ktx_time, travel_date)
+    n = store.count(direction, ktx_time, travel_date)
+    return {'ok': True, 'current_reservations': n}
+
+
+def _do_cancel(store, name, direction, ktx_time, travel_date):
+    """행동: 같은 슬롯에서 해당 이름의 예약을 취소(데모 규모: 슬롯 전체 비우고 재기록)."""
+    rows = [r for r in store.all_records()
+            if not (str(r.get('direction')) == direction
+                    and str(r.get('ktx_time')) == ktx_time
+                    and str(r.get('travel_date')) == travel_date
+                    and str(r.get('name')) == (name or '').strip())]
+    # 슬롯 비우고 본인 외 예약 복원
+    store.clear_slot(direction, ktx_time, travel_date)
+    keep = [(r.get('name'), r.get('direction'), r.get('ktx_time'), r.get('travel_date'))
+            for r in rows
+            if str(r.get('direction')) == direction
+            and str(r.get('ktx_time')) == ktx_time
+            and str(r.get('travel_date')) == travel_date]
+    if keep and hasattr(store, 'add_many'):
+        store.add_many(keep)
+    return {'ok': True, 'current_reservations': store.count(direction, ktx_time, travel_date)}
+
+
 @dataclass
 class StudentProfile:
     name: str
@@ -49,10 +75,9 @@ class NotifyAgent:
         self.store = store
         self.fare = fare
         self.client = OpenAI(api_key=get_secret('OPENAI_API_KEY'))
-        self._tools = self._build_tools()
 
-    def _build_tools(self):
-        return {
+    def _build_tools(self, allow_booking):
+        tools = {
             'find_shuttle': lambda direction, ktx_time, travel_date=None, reservations=0:
                 json.dumps(find_shuttle_slot(direction, ktx_time,
                            _weekday_of(travel_date), reservations, self.fare),
@@ -68,22 +93,34 @@ class NotifyAgent:
                 json.dumps(taxi_share_logic(self.store, direction, ktx_time, travel_date),
                            ensure_ascii=False),
         }
+        if allow_booking:
+            tools['make_reservation'] = lambda name, direction, ktx_time, travel_date: \
+                json.dumps(_do_reserve(self.store, name, direction, ktx_time, travel_date),
+                           ensure_ascii=False)
+            tools['cancel_reservation'] = lambda name, direction, ktx_time, travel_date: \
+                json.dumps(_do_cancel(self.store, name, direction, ktx_time, travel_date),
+                           ensure_ascii=False)
+        return tools
 
-    def generate(self, profile, max_rounds=10):
-        messages = [{'role': 'system', 'content': SYSTEM_PROMPT},
+    def generate(self, profile, allow_booking=False, max_rounds=10):
+        tools = self._build_tools(allow_booking)
+        schema = TOOLS_SCHEMA + (BOOKING_TOOLS_SCHEMA if allow_booking else [])
+        mode_note = (BOOKING_NOTE if allow_booking else RECOMMEND_ONLY_NOTE)
+        messages = [{'role': 'system', 'content': SYSTEM_PROMPT + '\n\n' + mode_note},
                     {'role': 'user', 'content': _profile_message(profile, self.fare)}]
+        msg = None
         for _ in range(max_rounds):
             resp = self.client.chat.completions.create(
-                model=MODEL, messages=messages, tools=TOOLS_SCHEMA)
+                model=MODEL, messages=messages, tools=schema)
             msg = resp.choices[0].message
             messages.append(msg)
             if not msg.tool_calls:
                 return msg.content
             for tc in msg.tool_calls:
                 args = json.loads(tc.function.arguments)
-                result = self._tools[tc.function.name](**args)
+                result = tools[tc.function.name](**args)
                 messages.append({'role': 'tool', 'tool_call_id': tc.id, 'content': result})
-        return msg.content or '(도구 호출 한도 초과)'
+        return (msg.content if msg else None) or '(도구 호출 한도 초과)'
 
 
 def _profile_message(p, fare):
@@ -100,17 +137,32 @@ SYSTEM_PROMPT = """너는 UNIST ↔ 울산역 이동 학생에게 '최적 교통
 추천 우선순위(위에서부터 '이용 가능'한 첫 수단): 1순위 셔틀 → 2순위 513 → 3순위 택시.
 
 [절차 — 한 번에 한 수단씩]
-1) find_shuttle 호출. available=true면 셔틀 추천 후 종료.
-   available=false이고 service='conditional'이면(예약<N*) find_taxi_share도 호출해 셰어 안내를 곁들인다.
-2) available=false면 fetch_513_arrival 호출.
+1) find_shuttle 호출.
+   - service가 'fixed' 또는 'conditional'이면(셔틀 슬롯 존재) → 셔틀 안내.
+   - available=false(조건부 N* 미달)이면 find_taxi_share도 호출: 같은 슬롯 예약자가
+     1명 이상 더 있으면(group_size>=2) 카풀을 함께 추천한다.
+   - service=null(슬롯 자체 없음)이면 2단계로.
+2) fetch_513_arrival 호출.
    found=true면 evaluate_connection으로 판정. SAFE/TIGHT/GOOD/LONG_WAIT면 513 추천 후 종료.
    MISS/BUS_TOO_SOON/BUS_BEFORE_READY거나 버스 없으면 3단계.
-3) recommend_taxi 호출 → 택시 추천. find_taxi_share로 셰어 가능하면 함께 안내.
+3) recommend_taxi 호출 → 택시 추천. find_taxi_share로 카풀 가능하면 함께 안내.
 
 [작성 규칙]
 - 시간/요일/요금 계산은 절대 직접 하지 말 것. 도구 반환값만 근거로.
 - 최종 추천 수단 1개 + 핵심 시각/수치 + 한 줄 이유. 2~4문장, 친근, 이모지 1~2개.
 - 조건부 셔틀이면 'N*' 임계값을 언급. 도구가 주지 않은 숫자/시각 금지."""
+
+# 예약 가능 모드: 셔틀 슬롯이 있으면 실제 예약을 수행
+BOOKING_NOTE = """[예약 모드]
+이번 요청은 학생이 '예약'을 눌러 시작됐다. 다음을 따른다:
+- find_shuttle 결과 service가 'fixed' 또는 'conditional'이면 → make_reservation(name,
+  direction, ktx_time, travel_date)을 호출해 실제로 예약한다. (조건부는 예약이 N* 카운트에
+  쌓이므로 미달이어도 예약한다.) 예약 후 결과를 안내한다.
+- service=null(슬롯 없음)이면 예약하지 말고 513/택시/카풀만 추천한다.
+- 예약했다면 메시지에 '예약 완료'와 현재 예약 인원을 명시한다."""
+
+RECOMMEND_ONLY_NOTE = """[추천 전용 모드]
+이번 요청은 '추천만 보기'다. 절대 예약을 수행하지 말고 추천/안내만 한다."""
 
 
 TOOLS_SCHEMA = [
@@ -147,4 +199,25 @@ TOOLS_SCHEMA = [
             'direction': {'type': 'string', 'enum': ['to_station', 'to_campus']},
             'ktx_time': {'type': 'string'}, 'travel_date': {'type': 'string'}},
             'required': ['direction', 'ktx_time', 'travel_date']}}},
+]
+
+
+# 예약 모드에서만 켜지는 행동 도구
+BOOKING_TOOLS_SCHEMA = [
+    {'type': 'function', 'function': {
+        'name': 'make_reservation',
+        'description': '실제 예약 기록. 셔틀 슬롯(fixed/conditional)이 있을 때만 호출.',
+        'parameters': {'type': 'object', 'properties': {
+            'name': {'type': 'string'},
+            'direction': {'type': 'string', 'enum': ['to_station', 'to_campus']},
+            'ktx_time': {'type': 'string'}, 'travel_date': {'type': 'string'}},
+            'required': ['name', 'direction', 'ktx_time', 'travel_date']}}},
+    {'type': 'function', 'function': {
+        'name': 'cancel_reservation',
+        'description': '같은 슬롯에서 해당 학생의 예약을 취소.',
+        'parameters': {'type': 'object', 'properties': {
+            'name': {'type': 'string'},
+            'direction': {'type': 'string', 'enum': ['to_station', 'to_campus']},
+            'ktx_time': {'type': 'string'}, 'travel_date': {'type': 'string'}},
+            'required': ['name', 'direction', 'ktx_time', 'travel_date']}}},
 ]

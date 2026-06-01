@@ -40,6 +40,18 @@ def test_taxi_share_logic():
     assert r['per_person_krw'] == 7000
 
 
+def test_make_and_cancel_reservation_actions():
+    from shuttle_system.agents.notify_agent import _do_reserve, _do_cancel
+    s = MemoryReservationStore()
+    r = _do_reserve(s, '홍길동', 'to_station', '13:58', '2026-06-05')
+    assert r['ok'] is True and r['current_reservations'] == 1
+    _do_reserve(s, '김철수', 'to_station', '13:58', '2026-06-05')
+    assert s.count('to_station', '13:58', '2026-06-05') == 2
+    c = _do_cancel(s, '홍길동', 'to_station', '13:58', '2026-06-05')
+    assert c['current_reservations'] == 1
+    assert s.names('to_station', '13:58', '2026-06-05') == ['김철수']
+
+
 def test_make_store_local_fallback(monkeypatch):
     # 서비스 계정 키 없음 + Colab 아님 -> 메모리 저장소로 폴백
     monkeypatch.delenv('GOOGLE_SERVICE_ACCOUNT_JSON', raising=False)

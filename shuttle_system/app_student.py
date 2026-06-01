@@ -83,27 +83,26 @@ def build_student_app(store, fare=POLICY_FARE):
             return f'⚠️ {info}'
         return f'{info}\n\n' + _status(direction_label, ktx, date)
 
-    def _recommend(name, direction_label, ktx, date):
+    def _recommend(name, direction_label, ktx, date, allow_booking):
         direction = DIRECTION_MAP[direction_label]
         date = _norm_date(date)
         n = store.count(direction, ktx, date)
         profile = StudentProfile(name=(name or '학생').strip(), direction=direction,
                                  ktx_time=ktx, travel_date=date, current_reservations=n)
         try:
-            return agent.generate(profile)
+            return agent.generate(profile, allow_booking=allow_booking)
         except Exception as e:
             return f'❌ 처리 중 오류: {e}'
 
     def on_reserve(name, direction_label, mode, bound_label, train_opt, desire_time, date):
+        # 예약은 에이전트가 make_reservation 도구로 직접 수행(셔틀 슬롯일 때만)
         ktx, info = _resolve_slot(mode, bound_label, train_opt, desire_time,
                                   DIRECTION_MAP[direction_label], date)
         if ktx is None:
             return f'⚠️ {info}', '예약 현황: -'
-        direction = DIRECTION_MAP[direction_label]
         d = _norm_date(date)
-        store.add(name, direction, ktx, d)
-        return (info + '\n\n' + _recommend(name, direction_label, ktx, d),
-                _status(direction_label, ktx, d))
+        msg = _recommend(name, direction_label, ktx, d, allow_booking=True)
+        return (info + '\n\n' + msg, _status(direction_label, ktx, d))
 
     def on_recommend_only(name, direction_label, mode, bound_label, train_opt, desire_time, date):
         ktx, info = _resolve_slot(mode, bound_label, train_opt, desire_time,
@@ -111,7 +110,7 @@ def build_student_app(store, fare=POLICY_FARE):
         if ktx is None:
             return f'⚠️ {info}', '예약 현황: -'
         d = _norm_date(date)
-        return (info + '\n\n' + _recommend(name, direction_label, ktx, d),
+        return (info + '\n\n' + _recommend(name, direction_label, ktx, d, allow_booking=False),
                 _status(direction_label, ktx, d))
 
     default_bound = timetable.BOUND_LABEL['seoul_bound']
