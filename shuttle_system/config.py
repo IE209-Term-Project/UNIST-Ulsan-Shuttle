@@ -1,5 +1,14 @@
-"""환경 차이 흡수: Colab Secrets ↔ 로컬 os.environ. 키 원문은 절대 코드에 두지 않는다."""
+"""환경 차이 흡수: Colab Secrets ↔ 로컬 os.environ. 키 원문은 절대 코드에 두지 않는다.
+
+로컬에서 .env 파일이 있으면 자동 로드한다(python-dotenv 설치 시). HF/Colab은 영향 없음.
+"""
 import os
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # 현재 폴더의 .env를 os.environ으로 (이미 설정된 값은 덮어쓰지 않음)
+except Exception:
+    pass
 
 
 def get_secret(name: str):

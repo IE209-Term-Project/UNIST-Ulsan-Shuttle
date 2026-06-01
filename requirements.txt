@@ -6,4 +6,5 @@ gspread>=6.0
 google-auth>=2.0
 matplotlib>=3.7
 requests>=2.31
+python-dotenv>=1.0
 pytest>=8.0

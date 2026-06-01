@@ -6,3 +6,5 @@ shuttle_data.json
 .DS_Store
 .claude/
 .env
+service_account.json
+*.json.key

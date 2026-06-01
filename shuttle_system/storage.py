@@ -117,11 +117,17 @@ class ServiceAccountSheetsStore(_SheetsStoreBase):
         from google.oauth2.service_account import Credentials
 
         raw = service_account_json or os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
-        if not raw:
-            raise RuntimeError(
-                'GOOGLE_SERVICE_ACCOUNT_JSON 환경변수가 없습니다. '
-                '서비스 계정 키(JSON)를 Secret으로 등록하세요.')
-        info = json.loads(raw)
+        if raw:
+            info = json.loads(raw)
+        else:
+            # 로컬 편의: JSON 문자열 대신 파일 경로로 줄 수도 있다
+            path = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE')
+            if not path:
+                raise RuntimeError(
+                    'GOOGLE_SERVICE_ACCOUNT_JSON(또는 GOOGLE_SERVICE_ACCOUNT_FILE)'
+                    ' 환경변수가 없습니다. 서비스 계정 키를 지정하세요.')
+            with open(os.path.expanduser(path), encoding='utf-8') as f:
+                info = json.load(f)
         creds = Credentials.from_service_account_info(info, scopes=GSPREAD_SCOPES)
         gc = gspread.authorize(creds)
 
@@ -144,11 +150,12 @@ class ServiceAccountSheetsStore(_SheetsStoreBase):
 def make_store():
     """환경을 감지해 적절한 예약 저장소를 반환한다.
 
-    1) GOOGLE_SERVICE_ACCOUNT_JSON 있으면 → ServiceAccountSheetsStore (HF Spaces 운영)
-    2) Colab 환경이면                 → SheetsReservationStore (인증 팝업)
-    3) 그 외(로컬/테스트)             → MemoryReservationStore (임시)
+    1) 서비스 계정 키(JSON 또는 FILE) 있으면 → ServiceAccountSheetsStore (HF/로컬 운영)
+    2) Colab 환경이면                       → SheetsReservationStore (인증 팝업)
+    3) 그 외(테스트)                        → MemoryReservationStore (임시)
     """
-    if os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON'):
+    if (os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
+            or os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE')):
         return ServiceAccountSheetsStore()
     try:
         import google.colab  # noqa: F401
