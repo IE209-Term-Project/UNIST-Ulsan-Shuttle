@@ -14,9 +14,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from shuttle_system.storage import make_store
-from shuttle_system.core.optimization import POLICY_FARE
+from shuttle_system.core.optimization import POLICY_FARE, breakeven_N
+from shuttle_system.core.schedule import all_slots, WEEKDAY_KR
 from shuttle_system import timetable
-from shuttle_system.recommend import recommend, slot_status, resolve_ktx
+from shuttle_system.recommend import recommend, slot_status, resolve_ktx, weekday_of
+from shuttle_system.agents.data_agent import fetch_513_arrival
 from shuttle_system.agents.alert_agent import run_notification_check
 from shuttle_system.agents.carpool_agent import form_carpool_groups, group_message
 from shuttle_system.kakao import send_to_me as kakao_send
@@ -125,6 +127,48 @@ def api_notify_check():
 def api_notify_delay():
     new = run_notification_check(store, fare=FARE, simulate_delay=True, pusher=kakao_send)
     return {'ok': True, 'new': [n['message'] for n in new]}
+
+
+# ── 실시간 513 (BIS) ────────────────────────────────
+@app.get('/api/bis')
+def api_bis():
+    """513 실시간 도착: 울산과학기술원 정류장 / 울산역 정류장."""
+    def safe(direction):
+        try:
+            return fetch_513_arrival(direction)
+        except Exception as e:
+            return {'found': False, 'note': f'조회 실패: {e}'}
+    return {'unist': safe('to_station'), 'ulsan': safe('to_campus')}
+
+
+# ── 셔틀 운행 계획 (해당 요일, 예약 반영 실시간) ───────
+@app.get('/api/plan')
+def api_plan(date: str = None):
+    date = (date or '').strip() or _today()
+    try:
+        wd = weekday_of(date)
+    except ValueError:
+        return JSONResponse({'ok': False, 'info': '날짜 형식 오류'}, status_code=400)
+    n_star = breakeven_N(FARE)
+    shuttles = []
+    for slot in all_slots():
+        if slot['wd'] != wd:
+            continue
+        count = store.count(slot['direction'], slot['ktx'], date)
+        if slot['service'] == 'fixed':
+            status, run = '운행 확정 (고정)', True
+        elif count >= n_star:
+            status, run = f'운행 확정 ({count}/{n_star}명)', True
+        else:
+            status, run = f'대기 중 ({count}/{n_star}명)', False
+        shuttles.append({
+            'slot': slot['slot'], 'direction': slot['direction'],
+            'dir_kr': '울산역행' if slot['direction'] == 'to_station' else '캠퍼스행',
+            'shuttle_time': slot['shuttle'], 'ktx': slot['ktx'],
+            'service': slot['service'], 'status': status, 'run': run, 'count': count})
+    shuttles.sort(key=lambda s: s['shuttle_time'])
+    return {'ok': True, 'date': date, 'weekday': WEEKDAY_KR[wd] + '요일',
+            'n_star': n_star, 'shuttles': shuttles}
 
 
 def _opt_time(v):

@@ -93,6 +93,28 @@
     <div id="result" class="hidden mt-5 rounded-2xl bg-blue-50 text-blue-900 p-4 text-[15px] leading-relaxed"></div>
   </section>
 
+  <!-- Live 513 -->
+  <section class="bg-white rounded-3xl p-7 card mb-8">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-xl font-semibold">🚌 실시간 513 버스</h2>
+      <button onclick="loadBis()" class="text-sm text-blue-600 font-medium hover:underline">새로고침</button>
+    </div>
+    <p class="text-gray-500 text-sm mb-3">울산 BIS 실시간 도착 정보</p>
+    <div id="bis" class="grid grid-cols-2 gap-3 text-[15px]">
+      <div class="rounded-2xl bg-gray-50 p-4 text-gray-400">불러오는 중…</div>
+    </div>
+  </section>
+
+  <!-- Shuttle plan -->
+  <section class="bg-white rounded-3xl p-7 card mb-8">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="text-xl font-semibold">🚍 셔틀 운행 계획</h2>
+      <span id="planDate" class="text-sm text-gray-400"></span>
+    </div>
+    <p class="text-gray-500 text-sm mb-3">선택한 날짜의 운행 예정 셔틀 · 예약 실시간 반영</p>
+    <ul id="plan" class="space-y-2 text-[15px]"><li class="text-gray-400">불러오는 중…</li></ul>
+  </section>
+
   <!-- Carpool -->
   <section id="carpool" class="bg-white rounded-3xl p-7 card mb-8">
     <h2 class="text-xl font-semibold mb-1">🚕 카풀</h2>
@@ -149,8 +171,34 @@ async function init() {
   bsel.innerHTML = Object.entries(TT).map(([k,v]) => `<option value="${k}">${v.label}</option>`).join('');
   fillTrains();
   bsel.onchange = fillTrains;
-  refreshFeed();
-  setInterval(pollAlerts, 15000);
+  $('date').onchange = loadPlan;
+  refreshFeed(); loadBis(); loadPlan();
+  setInterval(() => { pollAlerts(); loadBis(); }, 15000);
+}
+async function loadBis() {
+  try {
+    const d = await (await fetch('/api/bis')).json();
+    const cell = (label, x) => {
+      const t = x && x.found ? `${x.arrival_min}분 후 도착` : '도착 예정 없음';
+      const sub = x && x.found && x.present_stop ? `현재 ${x.present_stop}` : '';
+      return `<div class="rounded-2xl bg-gray-50 p-4"><div class="text-gray-500 text-sm">${label}</div>`
+           + `<div class="font-semibold mt-1">${t}</div><div class="text-xs text-gray-400 mt-0.5">${sub}</div></div>`;
+    };
+    $('bis').innerHTML = cell('울산과학기술원 정류장', d.unist) + cell('울산역 정류장', d.ulsan);
+  } catch(e) { $('bis').innerHTML = '<div class="text-gray-400">실시간 정보를 불러올 수 없습니다.</div>'; }
+}
+async function loadPlan() {
+  const date = $('date').value;
+  try {
+    const d = await (await fetch('/api/plan?date='+date)).json();
+    $('planDate').textContent = `${d.date} ${d.weekday||''}`;
+    const ul = $('plan');
+    ul.innerHTML = (d.shuttles && d.shuttles.length)
+      ? d.shuttles.map(s => `<li class="flex items-center justify-between border-b border-gray-100 pb-2">`
+          + `<span>${s.shuttle_time} · ${s.slot} <span class="text-gray-400 text-sm">(${s.dir_kr})</span></span>`
+          + `<span class="${s.run?'text-green-600':'text-gray-400'} font-medium text-sm">${s.status}</span></li>`).join('')
+      : '<li class="text-gray-400">이 날짜에 예정된 셔틀이 없습니다.</li>';
+  } catch(e) {}
 }
 function fillTrains() {
   const b = $('bound').value;
@@ -176,7 +224,7 @@ async function reserve() {
   if (!d.ok) return toast('⚠️ ' + d.info);
   show('result', d.message);
   (d.new_alerts||[]).forEach(m => toast('🔔 ' + m));
-  refreshFeed();
+  refreshFeed(); loadPlan();
 }
 async function carpoolSignup() {
   const d = await post('/api/carpool/signup', payload());

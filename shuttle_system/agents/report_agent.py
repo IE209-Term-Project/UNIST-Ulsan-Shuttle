@@ -30,7 +30,7 @@ def compute_operations_report(store, fare=POLICY_FARE, travel_date=None):
             and (travel_date is None or str(r.get('travel_date')) == travel_date))
 
         if slot['service'] == 'fixed':
-            dispatched = resv > 0  # 고정편은 예약 있으면 운행(확정편)
+            dispatched = resv > 0   # 고정편은 항상 운행하나, 리포트는 실제 탑승분만 집계
         else:
             dispatched = resv >= n_star
 
