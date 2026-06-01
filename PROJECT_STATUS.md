@@ -78,6 +78,31 @@ cp .env.example .env          # 키 채우기 (각자 발급)
 - **수요 N**은 설문 기반 demo 값. 실제 운영 시 누적 예약으로 갱신.
 - 시간표 변경 시 `shuttle_system/data/timetable.json`만 교체. 택시 할증시간은 `carpool_agent.py` 상수(현재 22~04시).
 
+## 6.5 최신 구성 — 커스텀 웹앱 (B-1)
+
+Gradio/Streamlit 외에, **apple 스타일 커스텀 프론트 + FastAPI** 버전을 추가했다.
+
+| 파일 | 역할 |
+|---|---|
+| `index.html` | 랜딩 페이지(소개) — GitHub Pages 배포용 |
+| `api.py` | FastAPI 백엔드 — 예약/현황/카풀/알림/BIS/운행계획 API + 예약페이지 서빙 |
+| `web/index.html` | 커스텀 예약 페이지(apple 스타일) — `api.py`가 서빙 |
+| `shuttle_system/recommend.py` | 결정론적 추천(LLM 없음) — 셔틀/513/택시/카풀 판단 + 예약 |
+
+**수요반응형 슬롯 모델 (최신):**
+- 고정 8편(금·토·일 피크) = 항상 운행
+- **그 외 모든 실제 KTX/SRT 시각 = 조건부** → 예약 N\*=8명 차면 운행, 미달이면 카풀/513/택시
+- 열차 없는 시각만 "셔틀 없음"
+
+**커스텀 앱 로컬 실행:**
+```bash
+.venv/bin/uvicorn api:app --host 127.0.0.1 --port 8000
+# 브라우저: http://127.0.0.1:8000
+```
+주요 API: `GET /api/timetable` · `POST /api/status|reserve|carpool/signup|notify/check` · `GET /api/bis|plan`
+
+**랜딩 페이지 배포(GitHub Pages):** repo Settings → Pages → main / (root) → `index.html` 공개.
+
 ## 7. 문서
 - 설계: `docs/superpowers/specs/2026-06-01-shuttle-agent-system-design.md`
 - 구현계획: `docs/superpowers/plans/`
