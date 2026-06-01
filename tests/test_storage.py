@@ -43,4 +43,5 @@ def test_taxi_share_logic():
 def test_make_store_local_fallback(monkeypatch):
     # 서비스 계정 키 없음 + Colab 아님 -> 메모리 저장소로 폴백
     monkeypatch.delenv('GOOGLE_SERVICE_ACCOUNT_JSON', raising=False)
+    monkeypatch.delenv('GOOGLE_SERVICE_ACCOUNT_FILE', raising=False)
     assert isinstance(make_store(), MemoryReservationStore)

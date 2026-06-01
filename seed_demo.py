@@ -37,10 +37,9 @@ def main():
     for prefix, direction, ktx, date, count in DEMO:
         if clear:
             store.clear_slot(direction, ktx, date)
-        for i in range(count):
-            store.add(f'{prefix}{i + 1}', direction, ktx, date)
-        now = store.count(direction, ktx, date)
-        print(f'  {date} {ktx} {direction:10s} → {count}명 추가 (현재 {now}명)')
+        rows = [(f'{prefix}{i + 1}', direction, ktx, date) for i in range(count)]
+        store.add_many(rows)  # 단일 API 호출 (분당 쓰기 한도 회피)
+        print(f'  {date} {ktx} {direction:10s} → {count}명 추가')
 
     print('\n완료. 관리자 대시보드에서 리포트를 생성해 확인하세요.')
 

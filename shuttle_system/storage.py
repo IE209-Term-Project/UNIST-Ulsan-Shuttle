@@ -11,6 +11,10 @@ import json
 import os
 from datetime import datetime
 
+# .env 자동 로드를 보장한다(config import의 부수효과). 이게 없으면 make_store가
+# 환경변수를 못 읽어 메모리 저장소로 잘못 떨어진다.
+from shuttle_system import config  # noqa: F401
+
 HEADER = ['name', 'direction', 'ktx_time', 'travel_date', 'created_at']
 
 # Google Sheets API 권한 범위 (시트 읽기/쓰기 + 이름으로 열기)
@@ -35,6 +39,11 @@ class MemoryReservationStore:
         self._rows.append({'name': (name or '익명').strip(), 'direction': direction,
                            'ktx_time': ktx_time, 'travel_date': travel_date,
                            'created_at': datetime.now().isoformat(timespec='seconds')})
+
+    def add_many(self, rows):
+        """rows: (name, direction, ktx_time, travel_date) 튜플 리스트."""
+        for name, direction, ktx_time, travel_date in rows:
+            self.add(name, direction, ktx_time, travel_date)
 
     def all_records(self):
         return list(self._rows)
@@ -64,6 +73,17 @@ class _SheetsStoreBase:
                             datetime.now().isoformat(timespec='seconds')],
                            value_input_option='RAW')
 
+    def add_many(self, rows):
+        """여러 예약을 단일 API 호출로 추가(분당 쓰기 한도 회피).
+
+        rows: (name, direction, ktx_time, travel_date) 튜플 리스트.
+        """
+        now = datetime.now().isoformat(timespec='seconds')
+        payload = [[(name or '익명').strip(), direction, ktx_time, travel_date, now]
+                   for name, direction, ktx_time, travel_date in rows]
+        if payload:
+            self.ws.append_rows(payload, value_input_option='RAW')
+
     def all_records(self):
         return self.ws.get_all_records()
 
@@ -79,11 +99,9 @@ class _SheetsStoreBase:
         kept = [r for r in self.all_records()
                 if not _match(r, direction, ktx_time, travel_date)]
         self.ws.clear()
-        self.ws.append_row(HEADER, value_input_option='RAW')
-        for r in kept:
-            self.ws.append_row([r.get('name'), r.get('direction'), r.get('ktx_time'),
-                                r.get('travel_date'), r.get('created_at')],
-                               value_input_option='RAW')
+        rows = [HEADER] + [[r.get('name'), r.get('direction'), r.get('ktx_time'),
+                            r.get('travel_date'), r.get('created_at')] for r in kept]
+        self.ws.append_rows(rows, value_input_option='RAW')  # 단일 호출
 
 
 class SheetsReservationStore(_SheetsStoreBase):
