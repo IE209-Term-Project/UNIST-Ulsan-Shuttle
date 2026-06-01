@@ -7,29 +7,30 @@ from shuttle_system.core.optimization import breakeven_N, POLICY_FARE
 WEEKDAY_KR = '월화수목금토일'
 
 # 고정 8회: 출발=KTX 17분 전 / 복귀=KTX 도착 15분 후 (확정 운행)
+# KTX 시각은 실제 시간표(5.15 기준)에 맞춰 정렬됨 → 기차연계 드롭다운에서 선택 가능
 SHUTTLE_FIXED = {
     'to_station': [
-        {'slot': '금 오후', 'wd': 4, 'ktx': '13:58', 'shuttle': '13:41', 'demand': 57},
-        {'slot': '금 저녁', 'wd': 4, 'ktx': '17:51', 'shuttle': '17:34', 'demand': 51},
-        {'slot': '목 저녁', 'wd': 3, 'ktx': '17:51', 'shuttle': '17:34', 'demand': 24},
-        {'slot': '토 오전', 'wd': 5, 'ktx': '10:02', 'shuttle': '09:45', 'demand': 26},
+        {'slot': '금 오후', 'wd': 4, 'ktx': '13:56', 'shuttle': '13:39', 'demand': 57},
+        {'slot': '금 저녁', 'wd': 4, 'ktx': '17:52', 'shuttle': '17:35', 'demand': 51},
+        {'slot': '목 저녁', 'wd': 3, 'ktx': '17:52', 'shuttle': '17:35', 'demand': 24},
+        {'slot': '토 오전', 'wd': 5, 'ktx': '10:00', 'shuttle': '09:43', 'demand': 26},
     ],
     'to_campus': [
         {'slot': '월 오전', 'wd': 0, 'ktx': '08:45', 'shuttle': '09:00', 'demand': 31},
         {'slot': '일 오후', 'wd': 6, 'ktx': '12:07', 'shuttle': '12:22', 'demand': 36},
-        {'slot': '일 저녁', 'wd': 6, 'ktx': '18:43', 'shuttle': '18:58', 'demand': 54},
-        {'slot': '일 야간', 'wd': 6, 'ktx': '20:29', 'shuttle': '20:44', 'demand': 61},
+        {'slot': '일 저녁', 'wd': 6, 'ktx': '18:38', 'shuttle': '18:53', 'demand': 54},
+        {'slot': '일 야간', 'wd': 6, 'ktx': '20:34', 'shuttle': '20:49', 'demand': 61},
     ],
 }
 
 # 조건부 5회: 예약 >= N* 일 때만 1회 배차 (전부 출발 방향)
 SHUTTLE_CONDITIONAL = {
     'to_station': [
-        {'slot': '목 오후', 'wd': 3, 'ktx': '13:58', 'shuttle': '13:41', 'demand': 13},
+        {'slot': '목 오후', 'wd': 3, 'ktx': '13:56', 'shuttle': '13:39', 'demand': 13},
         {'slot': '목 야간', 'wd': 3, 'ktx': '22:39', 'shuttle': '22:22', 'demand': 12},
-        {'slot': '금 오전', 'wd': 4, 'ktx': '10:02', 'shuttle': '09:45', 'demand': 16},
+        {'slot': '금 오전', 'wd': 4, 'ktx': '10:00', 'shuttle': '09:43', 'demand': 16},
         {'slot': '금 야간', 'wd': 4, 'ktx': '22:39', 'shuttle': '22:22', 'demand': 21},
-        {'slot': '토 오후', 'wd': 5, 'ktx': '13:58', 'shuttle': '13:41', 'demand': 14},
+        {'slot': '토 오후', 'wd': 5, 'ktx': '13:56', 'shuttle': '13:39', 'demand': 14},
     ],
     'to_campus': [],
 }
