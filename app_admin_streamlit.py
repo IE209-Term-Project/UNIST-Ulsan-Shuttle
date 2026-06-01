@@ -16,6 +16,7 @@ import streamlit as st
 from shuttle_system.storage import make_store
 from shuttle_system.core.optimization import breakeven_N
 from shuttle_system.agents.report_agent import compute_operations_report, narrate_report
+from shuttle_system.agents.alert_agent import run_notification_check, llm_compose
 
 st.set_page_config(page_title='UNIST 셔틀 운영 리포트', page_icon='🛠', layout='wide')
 
@@ -100,3 +101,26 @@ else:
     st.caption('버튼을 누르면 위 집계 숫자를 바탕으로 LLM이 서술 요약을 생성합니다.')
 
 st.caption(f"집계 시각: {report['generated_at']}")
+
+# ── 🔔 알림 에이전트 ────────────────────────────────
+st.divider()
+st.subheader('🔔 알림 에이전트')
+ca, cb = st.columns(2)
+if ca.button('지금 알림 체크'):
+    with st.spinner('감지 중...'):
+        new = run_notification_check(store, fare=fare, composer=llm_compose)
+    st.success(f'{len(new)}건의 새 알림 생성')
+if cb.button('⚠️ 지연 시뮬레이션 (데모)'):
+    new = run_notification_check(store, fare=fare, simulate_delay=True, composer=llm_compose)
+    st.success(f'{len(new)}건 생성(지연 포함)')
+
+
+@st.fragment(run_every=15)
+def alert_feed():
+    notes = store.all_notifications()
+    st.caption(f'총 {len(notes)}건 · 15초마다 자동 새로고침')
+    for n in notes[-10:][::-1]:
+        st.info(f"{n.get('message', '')}  \n_{n.get('created_at', '')}_")
+
+
+alert_feed()

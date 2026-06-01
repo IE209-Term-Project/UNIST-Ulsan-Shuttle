@@ -11,6 +11,7 @@ import gradio as gr
 from shuttle_system.core.optimization import breakeven_N, POLICY_FARE
 from shuttle_system.core.schedule import find_shuttle_near
 from shuttle_system.agents.notify_agent import NotifyAgent, StudentProfile
+from shuttle_system.agents.alert_agent import run_notification_check, llm_compose
 from shuttle_system import timetable
 
 DIRECTION_MAP = {
@@ -94,15 +95,33 @@ def build_student_app(store, fare=POLICY_FARE):
         except Exception as e:
             return f'❌ 처리 중 오류: {e}'
 
+    # ── 알림 피드 ───────────────────────────────────────
+    def render_feed():
+        notes = store.all_notifications()
+        if not notes:
+            return '🔔 알림 없음'
+        lines = [f"- {n.get('message', '')}" for n in notes[-8:][::-1]]
+        return '### 🔔 실시간 알림\n' + '\n'.join(lines)
+
+    def do_check():
+        run_notification_check(store, fare=fare, composer=llm_compose)
+        return render_feed()
+
+    def do_delay():
+        run_notification_check(store, fare=fare, simulate_delay=True, composer=llm_compose)
+        return render_feed()
+
     def on_reserve(name, direction_label, mode, bound_label, train_opt, desire_time, date):
         # 예약은 에이전트가 make_reservation 도구로 직접 수행(셔틀 슬롯일 때만)
         ktx, info = _resolve_slot(mode, bound_label, train_opt, desire_time,
                                   DIRECTION_MAP[direction_label], date)
         if ktx is None:
-            return f'⚠️ {info}', '예약 현황: -'
+            return f'⚠️ {info}', '예약 현황: -', render_feed()
         d = _norm_date(date)
         msg = _recommend(name, direction_label, ktx, d, allow_booking=True)
-        return (info + '\n\n' + msg, _status(direction_label, ktx, d))
+        # 예약 직후 능동 감지(이 예약이 N* 돌파/카풀 형성 트리거할 수 있음)
+        run_notification_check(store, fare=fare, composer=llm_compose)
+        return (info + '\n\n' + msg, _status(direction_label, ktx, d), render_feed())
 
     def on_recommend_only(name, direction_label, mode, bound_label, train_opt, desire_time, date):
         ktx, info = _resolve_slot(mode, bound_label, train_opt, desire_time,
@@ -141,12 +160,24 @@ def build_student_app(store, fare=POLICY_FARE):
         status_out = gr.Textbox(label='예약 현황', lines=4)
         rec_out = gr.Textbox(label='추천 결과', lines=5)
 
+        gr.Markdown('---')
+        with gr.Row():
+            notif_check_btn = gr.Button('🔔 지금 알림 체크')
+            delay_btn = gr.Button('⚠️ 지연 시뮬레이션 (데모)')
+        notif_out = gr.Markdown('🔔 알림 없음')
+
         bound_in.change(on_bound_change, bound_in, train_in)
         mode_in.change(on_mode_change, mode_in, [bound_in, train_in, desire_in])
         common = [name_in, dir_in, mode_in, bound_in, train_in, desire_in, date_in]
         check_btn.click(on_check,
                         [dir_in, mode_in, bound_in, train_in, desire_in, date_in],
                         status_out)
-        reserve_btn.click(on_reserve, common, [rec_out, status_out])
+        reserve_btn.click(on_reserve, common, [rec_out, status_out, notif_out])
         rec_btn.click(on_recommend_only, common, [rec_out, status_out])
+        notif_check_btn.click(do_check, None, notif_out)
+        delay_btn.click(do_delay, None, notif_out)
+
+        # 능동 갱신: 15초마다 알림 피드 새로고침
+        timer = gr.Timer(15)
+        timer.tick(render_feed, None, notif_out)
     return demo
