@@ -9,6 +9,8 @@
   - GOOGLE_SERVICE_ACCOUNT_JSON
   - RESERVATION_SHEET_ID
 """
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shuttle_system.storage import make_store
 from shuttle_system.app_student import build_student_app
 

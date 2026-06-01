@@ -13,6 +13,8 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shuttle_system.storage import make_store
 from shuttle_system.core.optimization import breakeven_N
 from shuttle_system.agents.report_agent import compute_operations_report, narrate_report

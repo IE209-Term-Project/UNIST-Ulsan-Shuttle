@@ -9,6 +9,8 @@
 """
 import sys
 
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shuttle_system.storage import make_store, MemoryReservationStore
 from shuttle_system.core.optimization import breakeven_N
 

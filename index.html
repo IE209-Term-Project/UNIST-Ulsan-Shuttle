@@ -21,7 +21,7 @@
 <!-- Nav -->
 <nav class="nav-blur bg-white/70 fixed top-0 inset-x-0 z-50 border-b border-black/5">
   <div class="max-w-6xl mx-auto px-6 h-12 flex items-center justify-between text-[13px]">
-    <a href="#top" class="font-semibold tracking-tight">🚌 UNIST Shuttle</a>
+    <a href="#top" class="font-semibold tracking-tight">UNIST Shuttle</a>
     <div class="hidden sm:flex items-center gap-7 text-gray-500">
       <a href="#problem" class="hover:text-gray-900 transition">문제</a>
       <a href="#how" class="hover:text-gray-900 transition">작동 방식</a>
@@ -59,7 +59,7 @@
 <section id="problem" class="py-28 px-6 bg-white">
   <div class="max-w-3xl mx-auto text-center">
     <h2 class="reveal text-4xl sm:text-5xl font-bold tracking-tight leading-tight">
-      버스 시간과 기차 시간이<br>맞지 않아 생기는 낭비.
+      버스와 기차 시간이 어긋날 때,<br>낭비가 생깁니다.
     </h2>
     <p class="reveal mt-6 text-xl text-gray-500 leading-relaxed">
       513번 버스와 KTX 연계 대기시간은 평균 <b class="text-gray-900">18.5분</b>,
@@ -123,8 +123,10 @@
 <!-- Model numbers -->
 <section id="model" class="py-28 px-6 bg-black text-white">
   <div class="max-w-5xl mx-auto text-center">
-    <h2 class="reveal text-4xl sm:text-5xl font-bold tracking-tight mb-4">최적화 모델 위에서 돕니다.</h2>
-    <p class="reveal text-gray-400 text-lg mb-16">“순편익 최대화 Z = Σ xₜ(b·Nₜ − C)” — 코드가 계산하고, 에이전트는 해석·행동합니다.</p>
+    <h2 class="reveal text-4xl sm:text-5xl font-bold tracking-tight mb-4">데이터가 운행을 결정합니다.</h2>
+    <p class="reveal text-gray-400 text-lg mb-16 max-w-2xl mx-auto leading-relaxed">
+      예상 승객이 손익분기 인원을 넘을 때만 운행하는 수요대응형 모델.
+      계산은 시스템이, 안내와 결정 전달은 에이전트가 맡습니다.</p>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-8">
       <div class="reveal"><div class="text-5xl font-bold">8명</div><div class="text-gray-400 mt-2">손익분기 N*</div></div>
       <div class="reveal"><div class="text-5xl font-bold">₩35,000</div><div class="text-gray-400 mt-2">1회 운영비 C</div></div>
