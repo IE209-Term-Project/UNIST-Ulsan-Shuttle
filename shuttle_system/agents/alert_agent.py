@@ -42,9 +42,11 @@ def detect_events(store, fare=POLICY_FARE, simulate_delay=False):
                            'travel_date': date, 'slot': slot.get('slot', ''), 'count': count,
                            'n_star': n_star})
         if not running and count >= 2:
+            from shuttle_system.agents.carpool_agent import fare_for_time, TAXI_CAPACITY
+            group = min(count, TAXI_CAPACITY)
             events.append({'type': 'carpool', 'direction': direction, 'ktx_time': ktx,
                            'travel_date': date, 'count': count,
-                           'per_person': round(14000 / count)})
+                           'per_person': round(fare_for_time(ktx) / group)})
     if simulate_delay and groups:
         (direction, ktx, date), count = next(iter(groups.items()))
         events.append({'type': 'delay', 'direction': direction, 'ktx_time': ktx,
@@ -70,8 +72,13 @@ def _key(e):
     return (e['type'], e['direction'], e['ktx_time'], e['travel_date'])
 
 
-def run_notification_check(store, fare=POLICY_FARE, simulate_delay=False, composer=None):
-    """새 이벤트만 알림 저장소에 기록하고, 생성된 알림 리스트를 반환."""
+def run_notification_check(store, fare=POLICY_FARE, simulate_delay=False,
+                           composer=None, pusher=None):
+    """새 이벤트만 알림 저장소에 기록하고, 생성된 알림 리스트를 반환.
+
+    pusher가 주어지면 생성된 알림마다 pusher(message)를 호출해 외부 발송(예: 카톡).
+    pusher는 예외를 던져도 전체 흐름을 막지 않는다.
+    """
     compose = composer or _template_message
     existing = {(str(n.get('type')), str(n.get('direction')), str(n.get('ktx_time')),
                  str(n.get('travel_date'))) for n in store.all_notifications()}
@@ -84,6 +91,11 @@ def run_notification_check(store, fare=POLICY_FARE, simulate_delay=False, compos
         store.add_notification(rec)
         created.append(rec)
         existing.add(_key(e))
+        if pusher:
+            try:
+                pusher(rec['message'])
+            except Exception:
+                pass
     return created
 
 

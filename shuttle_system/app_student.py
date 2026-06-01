@@ -9,10 +9,11 @@ from datetime import datetime
 import gradio as gr
 
 from shuttle_system.core.optimization import breakeven_N, POLICY_FARE
-from shuttle_system.core.schedule import find_shuttle_near
+from shuttle_system.core.schedule import find_shuttle_near, find_shuttle_slot
 from shuttle_system.agents.notify_agent import NotifyAgent, StudentProfile
-from shuttle_system.agents.alert_agent import run_notification_check, llm_compose
+from shuttle_system.agents.alert_agent import run_notification_check
 from shuttle_system.agents.carpool_agent import form_carpool_groups, group_message
+from shuttle_system.kakao import send_to_me as kakao_send
 from shuttle_system import timetable
 
 DIRECTION_MAP = {
@@ -78,12 +79,30 @@ def build_student_app(store, fare=POLICY_FARE):
         return (gr.update(visible=is_train), gr.update(visible=is_train),
                 gr.update(visible=not is_train))
 
+    def _slot_info(direction, ktx, date):
+        """이 시각에 배차되는 셔틀 정보(고정/조건부/없음)."""
+        try:
+            wd = _weekday(_norm_date(date))
+        except ValueError:
+            return '🚌 날짜 형식 오류'
+        cnt = store.count(direction, ktx, _norm_date(date))
+        slot = find_shuttle_slot(direction, ktx, wd, reservations=cnt, fare=fare)
+        if slot['service'] == 'fixed':
+            return f"🚌 이 시각 **고정 셔틀** {slot['shuttle_time']} 출발 (확정 운행)"
+        if slot['service'] == 'conditional':
+            state = '배차 확정' if slot['available'] else '미달 → 513/카풀 검토'
+            return (f"🚌 이 시각 **조건부 셔틀** {slot['shuttle_time']} 출발 "
+                    f"(예약 {cnt}/{n_star} → {state})")
+        return '🚌 이 시각엔 배차된 셔틀 없음 → 근방 셔틀(단순 이동 모드)·513·카풀 검토'
+
     def on_check(direction_label, mode, bound_label, train_opt, desire_time, date):
         ktx, info = _resolve_slot(mode, bound_label, train_opt, desire_time,
                                   DIRECTION_MAP[direction_label], date)
         if ktx is None:
             return f'⚠️ {info}'
-        return f'{info}\n\n' + _status(direction_label, ktx, date)
+        direction = DIRECTION_MAP[direction_label]
+        return (f'{info}\n{_slot_info(direction, ktx, date)}\n\n'
+                + _status(direction_label, ktx, date))
 
     def _recommend(name, direction_label, ktx, date, allow_booking):
         direction = DIRECTION_MAP[direction_label]
@@ -105,11 +124,18 @@ def build_student_app(store, fare=POLICY_FARE):
         return '### 🔔 실시간 알림\n' + '\n'.join(lines)
 
     def do_check():
-        run_notification_check(store, fare=fare, composer=llm_compose)
+        run_notification_check(store, fare=fare, pusher=kakao_send)   # 템플릿 + 카톡 발송
         return render_feed()
 
     def do_delay():
-        run_notification_check(store, fare=fare, simulate_delay=True, composer=llm_compose)
+        run_notification_check(store, fare=fare, simulate_delay=True, pusher=kakao_send)
+        return render_feed()
+
+    def poll_feed():
+        # 15초마다 능동 감지 → 새 알림이 있으면 토스트로 '푸시'처럼 표시
+        new = run_notification_check(store, fare=fare, pusher=kakao_send)
+        if new:
+            gr.Info(f'🔔 새 알림 {len(new)}건: {new[-1]["message"]}')
         return render_feed()
 
     def on_reserve(name, direction_label, mode, bound_label, train_opt, desire_time, date):
@@ -121,7 +147,9 @@ def build_student_app(store, fare=POLICY_FARE):
         d = _norm_date(date)
         msg = _recommend(name, direction_label, ktx, d, allow_booking=True)
         # 예약 직후 능동 감지(이 예약이 N* 돌파/카풀 형성 트리거할 수 있음)
-        run_notification_check(store, fare=fare, composer=llm_compose)
+        new = run_notification_check(store, fare=fare, pusher=kakao_send)
+        if new:
+            gr.Info(f'🔔 {new[-1]["message"]}')
         return (info + '\n\n' + msg, _status(direction_label, ktx, d), render_feed())
 
     # ── 카풀 ─────────────────────────────────────────────
@@ -210,7 +238,7 @@ def build_student_app(store, fare=POLICY_FARE):
         notif_check_btn.click(do_check, None, notif_out)
         delay_btn.click(do_delay, None, notif_out)
 
-        # 능동 갱신: 15초마다 알림 피드 새로고침
+        # 능동 갱신: 15초마다 감지 + 새 알림 토스트(푸시 느낌)
         timer = gr.Timer(15)
-        timer.tick(render_feed, None, notif_out)
+        timer.tick(poll_feed, None, notif_out)
     return demo

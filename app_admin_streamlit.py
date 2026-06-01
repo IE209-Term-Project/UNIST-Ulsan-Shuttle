@@ -16,8 +16,9 @@ import streamlit as st
 from shuttle_system.storage import make_store
 from shuttle_system.core.optimization import breakeven_N
 from shuttle_system.agents.report_agent import compute_operations_report, narrate_report
-from shuttle_system.agents.alert_agent import run_notification_check, llm_compose
+from shuttle_system.agents.alert_agent import run_notification_check
 from shuttle_system.agents.carpool_agent import form_carpool_groups, group_message
+from shuttle_system.kakao import send_to_me as kakao_send
 
 st.set_page_config(page_title='UNIST 셔틀 운영 리포트', page_icon='🛠', layout='wide')
 
@@ -109,10 +110,10 @@ st.subheader('🔔 알림 에이전트')
 ca, cb = st.columns(2)
 if ca.button('지금 알림 체크'):
     with st.spinner('감지 중...'):
-        new = run_notification_check(store, fare=fare, composer=llm_compose)
-    st.success(f'{len(new)}건의 새 알림 생성')
+        new = run_notification_check(store, fare=fare, pusher=kakao_send)
+    st.success(f'{len(new)}건의 새 알림 생성 (카톡 발송 시도)')
 if cb.button('⚠️ 지연 시뮬레이션 (데모)'):
-    new = run_notification_check(store, fare=fare, simulate_delay=True, composer=llm_compose)
+    new = run_notification_check(store, fare=fare, simulate_delay=True, pusher=kakao_send)
     st.success(f'{len(new)}건 생성(지연 포함)')
 
 

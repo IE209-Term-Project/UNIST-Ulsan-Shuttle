@@ -44,6 +44,26 @@ def test_run_check_dedup():
     assert len(s.all_notifications()) == 1
 
 
+def test_pusher_called_for_new_alerts():
+    s = MemoryReservationStore()
+    _seed(s, 'to_station', '13:58', '2026-06-04', 8)
+    sent = []
+    created = run_notification_check(s, fare=2000, pusher=lambda m: sent.append(m))
+    assert len(sent) == len(created) == 1
+    # 재실행 시 중복 없으므로 추가 발송 없음
+    run_notification_check(s, fare=2000, pusher=lambda m: sent.append(m))
+    assert len(sent) == 1
+
+
+def test_pusher_exception_does_not_break():
+    s = MemoryReservationStore()
+    _seed(s, 'to_station', '13:58', '2026-06-04', 8)
+    def boom(m):
+        raise RuntimeError('카톡 실패')
+    created = run_notification_check(s, fare=2000, pusher=boom)
+    assert len(created) == 1   # 발송 실패해도 알림 기록은 됨
+
+
 def test_delay_simulation():
     s = MemoryReservationStore()
     _seed(s, 'to_station', '13:58', '2026-06-04', 3)
