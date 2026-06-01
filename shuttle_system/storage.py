@@ -16,6 +16,8 @@ from datetime import datetime
 from shuttle_system import config  # noqa: F401
 
 HEADER = ['name', 'direction', 'ktx_time', 'travel_date', 'created_at']
+NOTIF_HEADER = ['created_at', 'type', 'direction', 'ktx_time', 'travel_date', 'message']
+NOTIF_SHEET = 'notifications'
 
 # Google Sheets API 권한 범위 (시트 읽기/쓰기 + 이름으로 열기)
 GSPREAD_SCOPES = [
@@ -34,6 +36,15 @@ def _match(r, direction, ktx_time, travel_date):
 class MemoryReservationStore:
     def __init__(self):
         self._rows = []
+        self._notifs = []
+
+    def add_notification(self, rec):
+        r = {'created_at': datetime.now().isoformat(timespec='seconds'), **rec}
+        self._notifs.append(r)
+        return r
+
+    def all_notifications(self):
+        return list(self._notifs)
 
     def add(self, name, direction, ktx_time, travel_date):
         self._rows.append({'name': (name or '익명').strip(), 'direction': direction,
@@ -67,6 +78,27 @@ class _SheetsStoreBase:
         if not vals or vals[0] != HEADER:
             self.ws.clear()
             self.ws.append_row(HEADER, value_input_option='RAW')
+
+    def _ensure_notif_ws(self, sh):
+        """notifications 워크시트 확보(없으면 생성)."""
+        import gspread
+        try:
+            self.notif_ws = sh.worksheet(NOTIF_SHEET)
+        except gspread.WorksheetNotFound:
+            self.notif_ws = sh.add_worksheet(NOTIF_SHEET, rows=1000, cols=len(NOTIF_HEADER))
+        vals = self.notif_ws.get_all_values()
+        if not vals or vals[0] != NOTIF_HEADER:
+            self.notif_ws.clear()
+            self.notif_ws.append_row(NOTIF_HEADER, value_input_option='RAW')
+
+    def add_notification(self, rec):
+        r = {'created_at': datetime.now().isoformat(timespec='seconds'), **rec}
+        self.notif_ws.append_row([r.get(k, '') for k in NOTIF_HEADER],
+                                 value_input_option='RAW')
+        return r
+
+    def all_notifications(self):
+        return self.notif_ws.get_all_records()
 
     def add(self, name, direction, ktx_time, travel_date):
         self.ws.append_row([(name or '익명').strip(), direction, ktx_time, travel_date,
@@ -120,6 +152,7 @@ class SheetsReservationStore(_SheetsStoreBase):
         self.ws = sh.sheet1
         self.url = sh.url
         self._ensure_header()
+        self._ensure_notif_ws(sh)
 
 
 class ServiceAccountSheetsStore(_SheetsStoreBase):
@@ -163,6 +196,7 @@ class ServiceAccountSheetsStore(_SheetsStoreBase):
         self.ws = sh.sheet1
         self.url = sh.url
         self._ensure_header()
+        self._ensure_notif_ws(sh)
 
 
 def make_store():
