@@ -1,5 +1,7 @@
 openai>=1.0
 gradio>=4.0
+streamlit>=1.30
+altair>=5.0
 gspread>=6.0
 google-auth>=2.0
 matplotlib>=3.7

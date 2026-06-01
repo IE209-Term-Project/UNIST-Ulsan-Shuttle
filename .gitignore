@@ -5,3 +5,4 @@ shuttle_data.json
 *.png
 .DS_Store
 .claude/
+.env
