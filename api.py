@@ -101,7 +101,12 @@ def api_reserve(req: ReserveReq):
         run_notification_check(store, fare=FARE, pusher=kakao_send)   # 알림 보장(중복 차단)
         new_msgs = [n.get('message', '') for n in store.all_notifications()[before:]]
         st = slot_status(store, req.direction, ktx, date, FARE)
-        trace = [TRACE_LABEL.get(t, t) for t in res.get('trace', [])]
+        # 연속 중복 호출은 하나로 합쳐 표시
+        trace = []
+        for t in res.get('trace', []):
+            label = TRACE_LABEL.get(t, t)
+            if not trace or trace[-1] != label:
+                trace.append(label)
         return {'ok': True, 'ktx_time': ktx, 'travel_date': date, 'info': res.get('info', ''),
                 'message': res['message'], 'trace': trace, 'new_alerts': new_msgs, **st}
     # 폴백: orchestrator 불가 → 결정론

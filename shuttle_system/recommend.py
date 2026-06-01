@@ -78,8 +78,9 @@ def recommend(store, name, direction, ktx_time, travel_date, fare=POLICY_FARE, d
         else:
             share = taxi_share_logic(store, direction, ktx_time, travel_date)
             msg = (f"📝 예약 접수! 현재 {count}/{n_star}명 — {n_star - count}명 더 모이면 "
-                   f"{slot['shuttle_time']} 셔틀 운행이 확정됩니다. 미달 시 같은 시각 "
-                   f"{share['group_size']}명과 택시 카풀(1인 약 {share['per_person_krw']:,}원)도 가능해요.")
+                   f"{slot['shuttle_time']} 셔틀 운행이 확정됩니다. 인원이 안 차면 같은 시각 "
+                   f"{share['group_size']}명과 택시 카풀(1인 약 {share['per_person_krw']:,}원·최대 4명) 또는 "
+                   f"513 버스를 이용할 수 있어요.")
         return {'mode': 'shuttle', 'booked': booked, 'reservations': count,
                 'required': n_star, 'service': service,
                 'shuttle_time': slot['shuttle_time'], 'message': msg}
