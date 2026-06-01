@@ -36,31 +36,52 @@ SHUTTLE_CONDITIONAL = {
 }
 
 
+DEPART_LEAD = 17   # 출발(to_station) 셔틀 = KTX − 17분
+ARRIVE_LAG = 15    # 복귀(to_campus) 셔틀 = KTX + 15분
+
+
+def _shift(hhmm, minutes):
+    from datetime import datetime, timedelta
+    return (datetime.strptime(hhmm, '%H:%M') + timedelta(minutes=minutes)).strftime('%H:%M')
+
+
+def shuttle_time_for(direction, ktx):
+    """KTX 시각 → 셔틀 시각(출발 −17 / 복귀 +15)."""
+    return _shift(ktx, -DEPART_LEAD if direction == 'to_station' else ARRIVE_LAG)
+
+
 def find_shuttle_slot(direction, ktx_time, weekday, reservations=0, fare=POLICY_FARE):
-    """요일+KTX 시각으로 배정된 셔틀편을 찾는다. 고정 우선, 없으면 조건부."""
+    """요일+KTX 시각의 셔틀편을 찾는다.
+
+    고정(피크) 우선 → 그 외 실재하는 모든 KTX/SRT 시각은 '조건부'(수요 N* 차면 운행).
+    실재 열차 시각이 아니면 셔틀 없음.
+    """
+    from shuttle_system import timetable
     ktx_time = ktx_time.strip()
     wd_kr = WEEKDAY_KR[weekday] + '요일'
 
+    # 1) 고정 피크
     for e in SHUTTLE_FIXED.get(direction, []):
         if e['wd'] == weekday and e['ktx'] == ktx_time:
             return {'available': True, 'service': 'fixed', 'mode': 'shuttle',
                     'weekday': wd_kr, 'slot': e['slot'], 'shuttle_time': e['shuttle'],
                     'ktx_time': e['ktx'], 'note': '고정 운행 확정편'}
 
-    n_star = breakeven_N(fare)
-    for e in SHUTTLE_CONDITIONAL.get(direction, []):
-        if e['wd'] == weekday and e['ktx'] == ktx_time:
-            ok = reservations >= n_star
-            return {'available': ok, 'service': 'conditional', 'mode': 'shuttle',
-                    'weekday': wd_kr, 'slot': e['slot'], 'shuttle_time': e['shuttle'],
-                    'ktx_time': e['ktx'], 'reservations': reservations,
-                    'required': n_star,
-                    'note': (f'조건부편 — 예약 {reservations}명 ≥ N*({n_star}) → 배차 확정'
-                             if ok else
-                             f'조건부편 — 예약 {reservations}/{n_star}명 → 배차 미정, 대체수단 검토')}
+    # 2) 그 외 실재 열차 시각 → 동적 조건부
+    if ktx_time in timetable.all_times():
+        n_star = breakeven_N(fare)
+        ok = reservations >= n_star
+        return {'available': ok, 'service': 'conditional', 'mode': 'shuttle',
+                'weekday': wd_kr, 'slot': f'{wd_kr} {ktx_time}',
+                'shuttle_time': shuttle_time_for(direction, ktx_time),
+                'ktx_time': ktx_time, 'reservations': reservations, 'required': n_star,
+                'note': (f'조건부 — 예약 {reservations}명 ≥ N*({n_star}) → 배차 확정'
+                         if ok else
+                         f'조건부 — 예약 {reservations}/{n_star}명 → 배차 미정, 대체수단 검토')}
 
+    # 3) 셔틀 불가
     return {'available': False, 'service': None, 'mode': 'shuttle', 'weekday': wd_kr,
-            'note': '해당 요일/KTX 시각에 배정된 셔틀편 없음 → 513/택시 검토'}
+            'note': '해당 시각에 운행 가능한 셔틀 없음 → 513/택시 검토'}
 
 
 def _to_min(hhmm):
@@ -73,17 +94,25 @@ def find_shuttle_near(direction, desired_time, weekday, window_min=30, fare=POLI
 
     window_min 이내 최근접 슬롯을 반환. 예약은 그 슬롯의 ktx_time 키로 합류시킨다.
     """
+    from shuttle_system import timetable
     target = _to_min(desired_time)
     best = None
-    for svc, table in (('fixed', SHUTTLE_FIXED), ('conditional', SHUTTLE_CONDITIONAL)):
-        for e in table.get(direction, []):
-            if e['wd'] != weekday:
-                continue
-            diff = abs(_to_min(e['shuttle']) - target)
-            if diff <= window_min and (best is None or diff < best['diff_min']):
-                best = {'found': True, 'service': svc, 'slot': e['slot'],
-                        'shuttle_time': e['shuttle'], 'ktx_time': e['ktx'],
-                        'diff_min': diff}
+    wd_kr = WEEKDAY_KR[weekday] + '요일'
+    # 고정 피크 (해당 요일)
+    for e in SHUTTLE_FIXED.get(direction, []):
+        if e['wd'] != weekday:
+            continue
+        diff = abs(_to_min(e['shuttle']) - target)
+        if diff <= window_min and (best is None or diff < best['diff_min']):
+            best = {'found': True, 'service': 'fixed', 'slot': e['slot'],
+                    'shuttle_time': e['shuttle'], 'ktx_time': e['ktx'], 'diff_min': diff}
+    # 동적 조건부 (모든 실재 열차 시각)
+    for ktx in timetable.all_times():
+        st = shuttle_time_for(direction, ktx)
+        diff = abs(_to_min(st) - target)
+        if diff <= window_min and (best is None or diff < best['diff_min']):
+            best = {'found': True, 'service': 'conditional', 'slot': f'{wd_kr} {ktx}',
+                    'shuttle_time': st, 'ktx_time': ktx, 'diff_min': diff}
     if best is None:
         return {'found': False, 'note': f'출발 희망 {desired_time} 근방 {window_min}분 내 셔틀 없음'}
     return best

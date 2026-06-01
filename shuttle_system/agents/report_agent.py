@@ -14,20 +14,28 @@ def compute_operations_report(store, fare=POLICY_FARE, travel_date=None):
 
     travel_date=None이면 모든 날짜의 예약을 슬롯(요일+KTX+방향) 단위로 합산.
     """
+    from collections import Counter
+    from shuttle_system.core.schedule import find_shuttle_slot
     n_star = breakeven_N(fare)
     records = store.all_records()
 
+    # 실제 예약을 (방향·KTX·날짜)로 묶어 집계 (동적 조건부 대응)
+    groups = Counter()
+    for r in records:
+        date = str(r.get('travel_date'))
+        if travel_date is not None and date != travel_date:
+            continue
+        groups[(str(r.get('direction')), str(r.get('ktx_time')), date)] += 1
+
     slot_rows = []
     total_runs = total_pax = total_net = total_wait_saved = 0
-    for slot in all_slots():
-        # 이 슬롯 요일과 일치하는 예약을 KTX시각·방향으로 합산
-        target_wd = slot['wd']
-        resv = sum(
-            1 for r in records
-            if str(r.get('direction')) == slot['direction']
-            and str(r.get('ktx_time')) == slot['ktx']
-            and _date_weekday(r.get('travel_date')) == target_wd
-            and (travel_date is None or str(r.get('travel_date')) == travel_date))
+    for (direction, ktx, date), resv in groups.items():
+        wd = _date_weekday(date)
+        if wd < 0:
+            continue
+        slot = find_shuttle_slot(direction, ktx, wd, reservations=resv, fare=fare)
+        if slot['service'] is None:
+            continue   # 셔틀 운행 불가 시각(513/택시 대상)은 운영 집계에서 제외
 
         if slot['service'] == 'fixed':
             dispatched = resv > 0   # 고정편은 항상 운행하나, 리포트는 실제 탑승분만 집계
@@ -45,12 +53,13 @@ def compute_operations_report(store, fare=POLICY_FARE, travel_date=None):
             total_wait_saved += wait_saved
 
         slot_rows.append({
-            'service': slot['service'], 'direction': slot['direction'],
-            'slot': slot['slot'], 'ktx': slot['ktx'],
+            'service': slot['service'], 'direction': direction,
+            'slot': slot['slot'], 'ktx': ktx,
             'reservations': resv, 'required': (n_star if slot['service'] == 'conditional' else 1),
             'dispatched': dispatched, 'net_benefit': round(nb),
-            'wait_saved_min': wait_saved, 'survey_demand': slot.get('demand')})
+            'wait_saved_min': wait_saved, 'survey_demand': None})
 
+    slot_rows.sort(key=lambda r: (r['ktx'], r['direction']))
     return {
         'fare': fare, 'n_star': n_star,
         'total_runs': total_runs, 'total_passengers': total_pax,

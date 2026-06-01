@@ -34,3 +34,23 @@ def train_options(bound):
 def parse_time(option):
     """'13:58 (KTX)' -> '13:58'."""
     return option.split()[0].strip()
+
+
+def all_times():
+    """양방향 KTX·SRT 울산 정차 시각 전체 집합."""
+    s = set()
+    for b in ('seoul_bound', 'busan_bound'):
+        d = _DATA.get(b, {})
+        s |= set(d.get('KTX', [])) | set(d.get('SRT', []))
+    return s
+
+
+def train_type(hhmm):
+    """해당 시각의 열차 종류(KTX/SRT) 추정. 없으면 None."""
+    for b in ('seoul_bound', 'busan_bound'):
+        d = _DATA.get(b, {})
+        if hhmm in d.get('KTX', []):
+            return 'KTX'
+        if hhmm in d.get('SRT', []):
+            return 'SRT'
+    return None
