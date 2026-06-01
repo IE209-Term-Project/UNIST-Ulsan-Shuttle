@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UNIST 셔틀버스 운영 구간 분석 대시보드</title>
+<style>
+  :root{
+    --bg:#f7f6f2; --card:#ffffff; --ink:#23231f; --muted:#6b6a63;
+    --line:#e6e4dc; --navy:#16264a;
+    --green:#1d9e75; --greenbg:#e1f5ee;
+    --amber:#ba7517; --amberbg:#faeeda;
+    --red:#a32d2d; --redbg:#fcebeb;
+    --blue:#185fa5; --bluebg:#e6f1fb;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Apple SD Gothic Neo','Malgun Gothic',sans-serif;background:var(--bg);color:var(--ink);line-height:1.5;padding:24px}
+  .wrap{max-width:1240px;margin:0 auto}
+  header{margin-bottom:20px}
+  h1{font-size:23px;font-weight:700;color:var(--navy);margin-bottom:6px}
+  .sub{color:var(--muted);font-size:14px}
+  .controls{display:flex;flex-wrap:wrap;gap:14px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin-bottom:20px}
+  .ctrl-group{display:flex;align-items:center;gap:8px}
+  .ctrl-group label{font-size:13px;color:var(--muted);font-weight:600}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{border:none;background:var(--card);padding:7px 14px;font-size:13px;cursor:pointer;color:var(--muted);font-weight:600;transition:.15s}
+  .seg button.active{background:var(--navy);color:#fff}
+  input[type=range]{width:160px;accent-color:var(--navy)}
+  .thval{font-weight:700;color:var(--navy);min-width:54px;font-size:14px}
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .kpi .num{font-size:30px;font-weight:700;color:var(--navy);line-height:1.1}
+  .kpi .lbl{font-size:12px;color:var(--muted);margin-top:4px}
+  .kpi.alert .num{color:var(--red)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+  .card h2{font-size:16px;font-weight:700;color:var(--navy);margin-bottom:4px}
+  .card .h-sub{font-size:12px;color:var(--muted);margin-bottom:14px}
+  .timeline{display:flex;flex-direction:column;gap:5px}
+  .tl-row{display:grid;grid-template-columns:46px 56px 1fr 52px;align-items:center;gap:8px;font-size:12px}
+  .tl-row .rnd{color:var(--muted);font-weight:600}
+  .tl-row .tm{color:var(--ink);font-variant-numeric:tabular-nums;font-size:11px}
+  .bar-track{position:relative;height:18px;background:#f0eee7;border-radius:4px;overflow:hidden}
+  .bar-fill{position:absolute;left:0;top:0;height:100%;border-radius:4px;transition:width .3s}
+  .bar-val{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+  .legend{display:flex;gap:16px;margin-top:14px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .reco{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:20px}
+  .reco h2{font-size:16px;font-weight:700;color:var(--navy);margin-bottom:14px}
+  .slot-list{display:flex;flex-direction:column;gap:10px}
+  .slot{display:grid;grid-template-columns:90px 1fr auto;gap:14px;align-items:center;padding:12px 16px;border-radius:10px;border-left:4px solid}
+  .slot.crit{background:var(--redbg);border-color:var(--red)}
+  .slot.warn{background:var(--amberbg);border-color:var(--amber)}
+  .slot .time{font-weight:700;font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .slot .desc{font-size:13px;color:var(--ink)}
+  .slot .desc small{color:var(--muted);display:block;margin-top:2px;font-size:11px}
+  .slot .tag{font-size:12px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap}
+  .slot.crit .tag{background:var(--red);color:#fff}
+  .slot.warn .tag{background:var(--amber);color:#fff}
+  .empty{color:var(--muted);font-size:13px;padding:14px;text-align:center}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{padding:7px 9px;text-align:center;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  th{background:#f0eee7;color:var(--navy);font-weight:700;position:sticky;top:0}
+  td.gap-crit{background:var(--redbg);color:var(--red);font-weight:700}
+  td.gap-warn{background:var(--amberbg);color:var(--amber);font-weight:700}
+  td.gap-ok{color:var(--green)}
+  td.gap-risk{background:#f3eaf6;color:#8b3a8b;font-weight:700}
+  .tbl-wrap{max-height:420px;overflow-y:auto;border:1px solid var(--line);border-radius:10px}
+  .foot{color:var(--muted);font-size:11px;margin-top:16px;line-height:1.6}
+  @media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>UNIST ↔ 울산역 셔틀버스 운영 구간 분석</h1>
+    <p class="sub">513번 버스 도착시각과 KTX/SRT 운행시각의 연계 공백 분석 · 설문 기반 허용 대기시간 임계값 적용</p>
+  </header>
+
+  <div class="controls">
+    <div class="ctrl-group">
+      <label>요일</label>
+      <div class="seg" id="daySeg">
+        <button data-day="wd" class="active">평일</button>
+        <button data-day="we">주말·공휴일</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <label>임계값 (이 시간 초과 시 셔틀 필요)</label>
+      <input type="range" id="thRange" min="15" max="40" value="20" step="5">
+      <span class="thval" id="thLabel">20분</span>
+    </div>
+    <div class="ctrl-group">
+      <label>심각 기준</label>
+      <span class="thval" id="critLabel">30분+</span>
+    </div>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>하행 — UNIST → 울산역 (기차 탑승)</h2>
+      <p class="h-sub">버스 도착 후 기차 출발까지 대기시간. 막대가 길수록 공백이 큼</p>
+      <div class="timeline" id="downTL"></div>
+    </div>
+    <div class="card">
+      <h2>상행 — 울산역 → UNIST (캠퍼스 복귀)</h2>
+      <p class="h-sub">기차 도착 후 버스 출발까지 대기시간. 막대가 길수록 공백이 큼</p>
+      <div class="timeline" id="upTL"></div>
+    </div>
+  </div>
+
+  <div class="reco">
+    <h2>🎯 셔틀버스 우선 투입 권장 구간</h2>
+    <div class="slot-list" id="recoList"></div>
+  </div>
+
+  <div class="card">
+    <h2>전체 연계 시간표</h2>
+    <p class="h-sub" id="tblSub"></p>
+    <div class="tbl-wrap"><table id="dataTable"></table></div>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--green)"></i> 양호 (임계값 이하)</span>
+      <span><i class="dot" style="background:var(--amber)"></i> 검토 (임계값 초과)</span>
+      <span><i class="dot" style="background:var(--red)"></i> 심각 (심각기준 초과 · 셔틀 필수)</span>
+      <span><i class="dot" style="background:#8b3a8b"></i> 환승위험 (3분 이하)</span>
+    </div>
+    <p class="foot">
+      * 하행 대기 = 연계 기차 출발 − 버스 울산역 도착(출발+20분) &nbsp;|&nbsp; 상행 대기 = 버스 울산역 출발 − 기차 도착<br>
+      * 데이터 출처: 513번 버스 평균 시간표 · 울산역 SRT/KTX 시간표 (2026.5.15 기준) &nbsp;|&nbsp; 임계값은 슬라이더로 조정 가능
+    </p>
+  </div>
+</div>
+
+<script>
+const DATA = [{"round": "1회", "wd_unist_dep": "06:15", "wd_station_arr": "06:35", "wd_train_dep": "06:48", "wd_down_wait": 13.0, "wd_train_arr": "07:45", "wd_bus_dep": "07:55", "wd_up_wait": 10.0, "we_unist_dep": "06:11", "we_station_arr": "06:31", "we_train_dep": "06:48", "we_down_wait": 17.0, "we_train_arr": "07:45", "we_bus_dep": "08:10", "we_up_wait": 25.0, "note": "평일/주말 상하행 1회차 연계 시작"}, {"round": "2회", "wd_unist_dep": "06:48", "wd_station_arr": "07:08", "wd_train_dep": "07:23", "wd_down_wait": 15.0, "wd_train_arr": "08:08", "wd_bus_dep": "08:35", "wd_up_wait": 27.0, "we_unist_dep": "07:07", "we_station_arr": "07:27", "we_train_dep": "07:44", "we_down_wait": 17.0, "we_train_arr": "08:08", "we_bus_dep": "08:10", "we_up_wait": 2.0, "note": "오전 등교 및 출근 집중 분석 구간"}, {"round": "3회", "wd_unist_dep": "07:07", "wd_station_arr": "07:27", "wd_train_dep": "07:44", "wd_down_wait": 17.0, "wd_train_arr": "08:45", "wd_bus_dep": "09:15", "wd_up_wait": 30.0, "we_unist_dep": "07:39", "we_station_arr": "07:59", "we_train_dep": "08:23", "we_down_wait": 24.0, "we_train_arr": "08:45", "we_bus_dep": "09:00", "we_up_wait": 15.0, "note": "🚨 [평일 상행] 30분 공백 (셔틀 검토)"}, {"round": "4회", "wd_unist_dep": "07:38", "wd_station_arr": "07:58", "wd_train_dep": "08:23", "wd_down_wait": 25.0, "wd_train_arr": "09:24", "wd_bus_dep": "09:53", "wd_up_wait": 29.0, "we_unist_dep": "08:06", "we_station_arr": "08:26", "we_train_dep": "08:45", "we_down_wait": 19.0, "we_train_arr": "09:24", "we_bus_dep": "09:45", "we_up_wait": 21.0, "note": "배차 격차 완만함"}, {"round": "5회", "wd_unist_dep": "08:18", "wd_station_arr": "08:38", "wd_train_dep": "08:57", "wd_down_wait": 19.0, "wd_train_arr": "10:31", "wd_bus_dep": "10:51", "wd_up_wait": 20.0, "we_unist_dep": "09:19", "we_station_arr": "09:39", "we_train_dep": "10:22", "we_down_wait": 43.0, "we_train_arr": "10:31", "we_bus_dep": "10:49", "we_up_wait": 18.0, "note": "🚨 [주말 하행] 43분 심각한 공백 (셔틀 필수)"}, {"round": "6회", "wd_unist_dep": "08:50", "wd_station_arr": "09:10", "wd_train_dep": "09:24", "wd_down_wait": 14.0, "wd_train_arr": "11:30", "wd_bus_dep": "11:53", "wd_up_wait": 23.0, "we_unist_dep": "09:55", "we_station_arr": "10:15", "we_train_dep": "10:22", "we_down_wait": 7.0, "we_train_arr": "11:30", "we_bus_dep": "11:53", "we_up_wait": 23.0, "note": "연계 비교적 양호"}, {"round": "7회", "wd_unist_dep": "09:29", "wd_station_arr": "09:49", "wd_train_dep": "10:22", "wd_down_wait": 33.0, "wd_train_arr": "11:40", "wd_bus_dep": "11:53", "wd_up_wait": 13.0, "we_unist_dep": "10:44", "we_station_arr": "11:04", "we_train_dep": "11:30", "we_down_wait": 26.0, "we_train_arr": "11:40", "we_bus_dep": "11:53", "we_up_wait": 13.0, "note": "🚨 [평일 하행] 33분 공백 (셔틀 검토)"}, {"round": "8회", "wd_unist_dep": "10:02", "wd_station_arr": "10:22", "wd_train_dep": "10:31", "wd_down_wait": 9.0, "wd_train_arr": "12:07", "wd_bus_dep": "12:42", "wd_up_wait": 35.0, "we_unist_dep": "11:44", "we_station_arr": "12:04", "we_train_dep": "12:07", "we_down_wait": 3.0, "we_train_arr": "12:07", "we_bus_dep": "12:08", "we_up_wait": 1.0, "note": "🚨 [평일 상행] 35분 공백 / [주말 상행] 1분 환승 위험"}, {"round": "9회", "wd_unist_dep": "10:41", "wd_station_arr": "11:01", "wd_train_dep": "11:30", "wd_down_wait": 29.0, "wd_train_arr": "13:04", "wd_bus_dep": "13:08", "wd_up_wait": 4.0, "we_unist_dep": "12:15", "we_station_arr": "12:35", "we_train_dep": "13:04", "we_down_wait": 29.0, "we_train_arr": "13:04", "we_bus_dep": "13:11", "we_up_wait": 7.0, "note": "상행 열차 하차 후 타이트한 연계"}, {"round": "10회", "wd_unist_dep": "11:15", "wd_station_arr": "11:35", "wd_train_dep": "11:40", "wd_down_wait": 5.0, "wd_train_arr": "14:18", "wd_bus_dep": "14:31", "wd_up_wait": 13.0, "we_unist_dep": "12:38", "we_station_arr": "12:58", "we_train_dep": "13:04", "we_down_wait": 6.0, "we_train_arr": "14:18", "we_bus_dep": "14:57", "we_up_wait": 39.0, "note": "🚨 [주말 상행] 39분 복귀 공백 (셔틀 필수)"}, {"round": "11회", "wd_unist_dep": "11:39", "wd_station_arr": "11:59", "wd_train_dep": "12:07", "wd_down_wait": 8.0, "wd_train_arr": "14:36", "wd_bus_dep": "14:57", "wd_up_wait": 21.0, "we_unist_dep": "13:40", "we_station_arr": "14:00", "we_train_dep": "14:18", "we_down_wait": 18.0, "we_train_arr": "14:36", "we_bus_dep": "14:57", "we_up_wait": 21.0, "note": "오후 교대 운행 구간"}, {"round": "12회", "wd_unist_dep": "12:11", "wd_station_arr": "12:31", "wd_train_dep": "13:04", "wd_down_wait": 33.0, "wd_train_arr": "15:44", "wd_bus_dep": "16:16", "wd_up_wait": 32.0, "we_unist_dep": "14:09", "we_station_arr": "14:29", "we_train_dep": "14:36", "we_down_wait": 7.0, "we_train_arr": "15:44", "we_bus_dep": "15:55", "we_up_wait": 11.0, "note": "🚨 [평일 하행] 33분 / [평일 상행] 32분 양방향 공백"}, {"round": "13회", "wd_unist_dep": "12:44", "wd_station_arr": "13:04", "wd_train_dep": "13:04", "wd_down_wait": 0.0, "wd_train_arr": "16:38", "wd_bus_dep": "16:49", "wd_up_wait": 11.0, "we_unist_dep": "14:53", "we_station_arr": "15:13", "we_train_dep": "15:44", "we_down_wait": 31.0, "we_train_arr": "16:38", "we_bus_dep": "16:51", "we_up_wait": 13.0, "note": "⚠️ [평일 하행] 0분 환승 불가 / [주말 하행] 31분 공백"}, {"round": "14회", "wd_unist_dep": "13:08", "wd_station_arr": "13:28", "wd_train_dep": "14:18", "wd_down_wait": 50.0, "wd_train_arr": "17:18", "wd_bus_dep": "17:51", "wd_up_wait": 33.0, "we_unist_dep": "15:54", "we_station_arr": "16:14", "we_train_dep": "16:38", "we_down_wait": 24.0, "we_train_arr": "17:18", "we_bus_dep": "17:19", "we_up_wait": 1.0, "note": "🚨 [평일 하행] 50분 최장 공백 (셔틀 필수) / [주말 상행] 1분 위험"}, {"round": "15회", "wd_unist_dep": "13:41", "wd_station_arr": "14:01", "wd_train_dep": "14:18", "wd_down_wait": 17.0, "wd_train_arr": "18:11", "wd_bus_dep": "18:31", "wd_up_wait": 20.0, "we_unist_dep": "16:21", "we_station_arr": "16:41", "we_train_dep": "17:18", "we_down_wait": 37.0, "we_train_arr": "18:11", "we_bus_dep": "18:31", "we_up_wait": 20.0, "note": "🚨 [주말 하행] 37분 공백 발생"}, {"round": "16회", "wd_unist_dep": "14:07", "wd_station_arr": "14:27", "wd_train_dep": "14:36", "wd_down_wait": 9.0, "wd_train_arr": "18:43", "wd_bus_dep": "19:11", "wd_up_wait": 28.0, "we_unist_dep": "16:52", "we_station_arr": "17:12", "we_train_dep": "17:18", "we_down_wait": 6.0, "we_train_arr": "18:43", "we_bus_dep": "19:11", "we_up_wait": 28.0, "note": "연계 양호"}, {"round": "17회", "wd_unist_dep": "14:52", "wd_station_arr": "15:12", "wd_train_dep": "15:44", "wd_down_wait": 32.0, "wd_train_arr": "19:24", "wd_bus_dep": "19:40", "wd_up_wait": 16.0, "we_unist_dep": "17:44", "we_station_arr": "18:04", "we_train_dep": "18:11", "we_down_wait": 7.0, "we_train_arr": "19:24", "we_bus_dep": "19:38", "we_up_wait": 14.0, "note": "🚨 [평일 하행] 32분 공백 구간"}, {"round": "18회", "wd_unist_dep": "15:21", "wd_station_arr": "15:41", "wd_train_dep": "15:44", "wd_down_wait": 3.0, "wd_train_arr": "20:29", "wd_bus_dep": "20:56", "wd_up_wait": 27.0, "we_unist_dep": "18:14", "we_station_arr": "18:34", "we_train_dep": "18:43", "we_down_wait": 9.0, "we_train_arr": "20:29", "we_bus_dep": "20:56", "we_up_wait": 27.0, "note": "하행 타이트함 / 야간 대기 진입"}, {"round": "19회", "wd_unist_dep": "15:49", "wd_station_arr": "16:09", "wd_train_dep": "16:38", "wd_down_wait": 29.0, "wd_train_arr": "21:16", "wd_bus_dep": "21:27", "wd_up_wait": 11.0, "we_unist_dep": "18:24", "we_station_arr": "18:44", "we_train_dep": "19:24", "we_down_wait": 40.0, "we_train_arr": "21:16", "we_bus_dep": "21:27", "we_up_wait": 11.0, "note": "🚨 [주말 하행] 40분 저녁 귀가 공백 (셔틀 필수)"}, {"round": "20회", "wd_unist_dep": "16:21", "wd_station_arr": "16:41", "wd_train_dep": "17:18", "wd_down_wait": 37.0, "wd_train_arr": "21:49", "wd_bus_dep": "21:53", "wd_up_wait": 4.0, "we_unist_dep": "19:36", "we_station_arr": "19:56", "we_train_dep": "20:29", "we_down_wait": 33.0, "we_train_arr": "21:49", "we_bus_dep": "21:54", "we_up_wait": 5.0, "note": "🚨 [평일 하행] 37분 / [주말 하행] 33분 공백"}, {"round": "21회", "wd_unist_dep": "16:53", "wd_station_arr": "17:13", "wd_train_dep": "17:18", "wd_down_wait": 5.0, "wd_train_arr": "22:19", "wd_bus_dep": "22:36", "wd_up_wait": 17.0, "we_unist_dep": "20:36", "we_station_arr": "20:56", "we_train_dep": "21:16", "we_down_wait": 20.0, "we_train_arr": "22:19", "we_bus_dep": "22:25", "we_up_wait": 6.0, "note": "야간 복귀 연계 양호"}, {"round": "22회", "wd_unist_dep": "17:21", "wd_station_arr": "17:41", "wd_train_dep": "18:11", "wd_down_wait": 30.0, "wd_train_arr": "22:59", "wd_bus_dep": "23:15", "wd_up_wait": 16.0, "we_unist_dep": "21:05", "we_station_arr": "21:25", "we_train_dep": "21:49", "we_down_wait": 24.0, "we_train_arr": null, "we_bus_dep": null, "we_up_wait": null, "note": null}, {"round": "23회", "wd_unist_dep": "17:41", "wd_station_arr": "18:01", "wd_train_dep": "18:11", "wd_down_wait": 10.0, "wd_train_arr": null, "wd_bus_dep": null, "wd_up_wait": null, "we_unist_dep": "21:46", "we_station_arr": "21:49", "we_train_dep": 3.0, "we_down_wait": null, "we_train_arr": null, "we_bus_dep": "주말 막차 권역 타이트함", "we_up_wait": null, "note": null}, {"round": "24회", "wd_unist_dep": "18:08", "wd_station_arr": "18:28", "wd_train_dep": "18:43", "wd_down_wait": 15.0, "wd_train_arr": null, "wd_bus_dep": null, "wd_up_wait": null, "we_unist_dep": "22:39", "we_station_arr": "22:59", "we_train_dep": 20.0, "we_down_wait": null, "we_train_arr": null, "we_bus_dep": "주말 최종 일정 마감", "we_up_wait": null, "note": null}, {"round": "25회", "wd_unist_dep": "18:44", "wd_station_arr": "19:04", "wd_train_dep": "19:24", "wd_down_wait": 20.0, "wd_train_arr": null, "wd_bus_dep": null, "wd_up_wait": null, "we_unist_dep": null, "we_station_arr": null, "we_train_dep": null, "we_down_wait": null, "we_train_arr": null, "we_bus_dep": null, "we_up_wait": null, "note": null}, {"round": "26회", "wd_unist_dep": "19:42", "wd_station_arr": "20:02", "wd_train_dep": "20:29", "wd_down_wait": 27.0, "wd_train_arr": null, "wd_bus_dep": null, "wd_up_wait": null, "we_unist_dep": null, "we_station_arr": null, "we_train_dep": null, "we_down_wait": null, "we_train_arr": null, "we_bus_dep": null, "we_up_wait": null, "note": null}, {"round": "27회", "wd_unist_dep": "20:06", "wd_station_arr": "20:26", "wd_train_dep": "20:29", "wd_down_wait": 3.0, "wd_train_arr": null, "wd_bus_dep": null, "wd_up_wait": null, "we_unist_dep": null, "we_station_arr": null, "we_train_dep": null, "we_down_wait": null, "we_train_arr": null, "we_bus_dep": null, "we_up_wait": null, "note": null}, {"round": "28회", "wd_unist_dep": "20:36", "wd_station_arr": "20:56", "wd_train_dep": "21:16", "wd_down_wait": 20.0, "wd_train_arr": null, "wd_bus_dep": null, "wd_up_wait": null, "we_unist_dep": null, "we_station_arr": null, "we_train_dep": null, "we_down_wait": null, "we_train_arr": null, "we_bus_dep": null, "we_up_wait": null, "note": null}, {"round": "29회", "wd_unist_dep": "21:05", "wd_station_arr": "21:25", "wd_train_dep": "21:49", "wd_down_wait": 24.0, "wd_train_arr": null, "wd_bus_dep": null, "wd_up_wait": null, "we_unist_dep": null, "we_station_arr": null, "we_train_dep": null, "we_down_wait": null, "we_train_arr": null, "we_bus_dep": null, "we_up_wait": null, "note": null}, {"round": "30회", "wd_unist_dep": "21:29", "wd_station_arr": "21:49", "wd_train_dep": "21:49", "wd_down_wait": 0.0, "wd_train_arr": null, "wd_bus_dep": null, "wd_up_wait": null, "we_unist_dep": null, "we_station_arr": null, "we_train_dep": null, "we_down_wait": null, "we_train_arr": null, "we_bus_dep": null, "we_up_wait": null, "note": null}, {"round": "31회", "wd_unist_dep": "21:54", "wd_station_arr": "22:14", "wd_train_dep": "22:19", "wd_down_wait": 5.0, "wd_train_arr": null, "wd_bus_dep": null, "wd_up_wait": null, "we_unist_dep": null, "we_station_arr": null, "we_train_dep": null, "we_down_wait": null, "we_train_arr": null, "we_bus_dep": null, "we_up_wait": null, "note": null}, {"round": "32회", "wd_unist_dep": "22:12", "wd_station_arr": "22:32", "wd_train_dep": "22:59", "wd_down_wait": 27.0, "wd_train_arr": null, "wd_bus_dep": null, "wd_up_wait": null, "we_unist_dep": null, "we_station_arr": null, "we_train_dep": null, "we_down_wait": null, "we_train_arr": null, "we_bus_dep": null, "we_up_wait": null, "note": null}, {"round": "33회", "wd_unist_dep": "22:52", "wd_station_arr": "23:12", "wd_train_dep": "-", "wd_down_wait": null, "wd_train_arr": null, "wd_bus_dep": null, "wd_up_wait": null, "we_unist_dep": null, "we_station_arr": null, "we_train_dep": null, "we_down_wait": null, "we_train_arr": null, "we_bus_dep": null, "we_up_wait": null, "note": null}];
+let day = "wd";
+let TH = 20;
+const CRIT = () => TH + 10;
+
+const $ = s => document.querySelector(s);
+
+document.querySelectorAll('#daySeg button').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('#daySeg button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); day=b.dataset.day; render();
+  };
+});
+$('#thRange').oninput=e=>{
+  TH=+e.target.value;
+  $('#thLabel').textContent=TH+'분';
+  $('#critLabel').textContent=CRIT()+'분+';
+  render();
+};
+
+function sev(w){
+  if(w==null) return 'na';
+  if(w<=3) return 'risk';
+  if(w>CRIT()) return 'crit';
+  if(w>TH) return 'warn';
+  return 'ok';
+}
+function barColor(s){
+  return s==='crit'?'var(--red)':s==='warn'?'var(--amber)':s==='risk'?'#8b3a8b':'var(--green)';
+}
+
+function render(){
+  const dw = day==='wd'?'wd_down_wait':'we_down_wait';
+  const uw = day==='wd'?'wd_up_wait':'we_up_wait';
+  const dep_d = day==='wd'?'wd_unist_dep':'we_unist_dep';
+  const trn_d = day==='wd'?'wd_train_dep':'we_train_dep';
+  const arr_u = day==='wd'?'wd_train_arr':'we_train_arr';
+  const bus_u = day==='wd'?'wd_bus_dep':'we_bus_dep';
+
+  const downVals = DATA.filter(r=>typeof r[dw]==='number');
+  const upVals = DATA.filter(r=>typeof r[uw]==='number');
+  const allW = [...downVals.map(r=>r[dw]),...upVals.map(r=>r[uw])];
+
+  const flagged = allW.filter(w=>w>TH).length;
+  const crit = allW.filter(w=>w>CRIT()).length;
+  const maxGap = Math.max(...allW);
+  const avgGap = (allW.reduce((a,b)=>a+b,0)/allW.length).toFixed(0);
+
+  $('#kpis').innerHTML = `
+    <div class="kpi"><div class="num">${allW.length}</div><div class="lbl">분석 연계 구간 수</div></div>
+    <div class="kpi alert"><div class="num">${flagged}</div><div class="lbl">셔틀 검토 구간 (${TH}분 초과)</div></div>
+    <div class="kpi alert"><div class="num">${crit}</div><div class="lbl">셔틀 필수 구간 (${CRIT()}분 초과)</div></div>
+    <div class="kpi"><div class="num">${maxGap}<small style="font-size:14px">분</small></div><div class="lbl">최대 공백 시간</div></div>`;
+
+  const maxBar = 50;
+  const buildTL = (arr, wkey, depkey, tgtkey)=> arr.map(r=>{
+    const w=r[wkey], s=sev(w), pct=Math.min(100,w/maxBar*100);
+    return `<div class="tl-row">
+      <span class="rnd">${r.round}</span>
+      <span class="tm">${r[depkey]||'-'}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${barColor(s)}"></div></div>
+      <span class="bar-val" style="color:${barColor(s)}">${w}분</span>
+    </div>`;
+  }).join('');
+
+  $('#downTL').innerHTML = buildTL(downVals, dw, dep_d, trn_d);
+  $('#upTL').innerHTML = buildTL(upVals, uw, arr_u, bus_u);
+
+  // Recommendations
+  const recos=[];
+  downVals.forEach(r=>{ if(r[dw]>TH) recos.push({dir:'하행',round:r.round,dep:r[dep_d],tgt:r[trn_d],w:r[dw],type:'기차 탑승'}); });
+  upVals.forEach(r=>{ if(r[uw]>TH) recos.push({dir:'상행',round:r.round,dep:r[arr_u],tgt:r[bus_u],w:r[uw],type:'캠퍼스 복귀'}); });
+  recos.sort((a,b)=>b.w-a.w);
+
+  $('#recoList').innerHTML = recos.length? recos.map(r=>{
+    const c=r.w>CRIT()?'crit':'warn';
+    const tag=r.w>CRIT()?'셔틀 필수':'셔틀 검토';
+    return `<div class="slot ${c}">
+      <div class="time">${r.dep}</div>
+      <div class="desc">[${r.dir}] ${r.type} · ${r.round} 연계<br><small>버스 ${r.dir==='하행'?'도착':'기차 도착'} ${r.dep} → ${r.dir==='하행'?'기차 출발':'버스 출발'} ${r.tgt}</small></div>
+      <div class="tag">${tag} · ${r.w}분 대기</div>
+    </div>`;
+  }).join('') : '<div class="empty">현재 임계값 기준 셔틀 필요 구간이 없습니다.</div>';
+
+  // Table
+  $('#tblSub').textContent = (day==='wd'?'평일':'주말·공휴일')+' 기준 · 셀 색상은 대기시간 심각도';
+  const cell=(w)=>{const s=sev(w);const cls=s==='crit'?'gap-crit':s==='warn'?'gap-warn':s==='risk'?'gap-risk':s==='ok'?'gap-ok':'';return `<td class="${cls}">${w==null?'-':w+'분'}</td>`;};
+  let html=`<thead><tr><th>회차</th><th>하행<br>UNIST출발</th><th>하행<br>기차출발</th><th>하행<br>대기</th><th>상행<br>기차도착</th><th>상행<br>버스출발</th><th>상행<br>대기</th></tr></thead><tbody>`;
+  DATA.forEach(r=>{
+    const dwv=r[dw], uwv=r[uw];
+    if(dwv==null && uwv==null && !r[dep_d]) return;
+    html+=`<tr><td>${r.round}</td><td>${r[dep_d]||'-'}</td><td>${r[trn_d]||'-'}</td>${cell(dwv)}<td>${r[arr_u]||'-'}</td><td>${r[bus_u]||'-'}</td>${cell(uwv)}</tr>`;
+  });
+  html+='</tbody>';
+  $('#dataTable').innerHTML=html;
+}
+render();
+</script>
+</body>
+</html>
