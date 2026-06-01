@@ -37,7 +37,17 @@ def test_taxi_share_logic():
     r = taxi_share_logic(s, 'to_station', '13:58', '2026-06-05', exclude_name='A')
     assert r['group_size'] == 2          # B + 본인
     assert 'B' in r['companions']
-    assert r['per_person_krw'] == 7000
+    assert r['per_person_krw'] == 5000   # 평시 10000 / 2명
+
+
+def test_taxi_share_caps_at_four():
+    from shuttle_system.agents.notify_agent import taxi_share_logic
+    s = MemoryReservationStore()
+    for nm in ['A', 'B', 'C', 'D', 'E', 'F']:
+        s.add(nm, 'to_station', '13:58', '2026-06-05')
+    r = taxi_share_logic(s, 'to_station', '13:58', '2026-06-05')
+    assert r['group_size'] == 4          # 정원 상한
+    assert r['per_person_krw'] == 2500   # 10000 / 4
 
 
 def test_make_and_cancel_reservation_actions():

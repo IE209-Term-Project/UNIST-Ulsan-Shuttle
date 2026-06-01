@@ -12,6 +12,7 @@ from shuttle_system.core.optimization import breakeven_N, POLICY_FARE
 from shuttle_system.core.schedule import find_shuttle_near
 from shuttle_system.agents.notify_agent import NotifyAgent, StudentProfile
 from shuttle_system.agents.alert_agent import run_notification_check, llm_compose
+from shuttle_system.agents.carpool_agent import form_carpool_groups, group_message
 from shuttle_system import timetable
 
 DIRECTION_MAP = {
@@ -123,6 +124,30 @@ def build_student_app(store, fare=POLICY_FARE):
         run_notification_check(store, fare=fare, composer=llm_compose)
         return (info + '\n\n' + msg, _status(direction_label, ktx, d), render_feed())
 
+    # ── 카풀 ─────────────────────────────────────────────
+    def on_carpool_signup(name, direction_label, mode, bound_label, train_opt, desire_time, date):
+        ktx, info = _resolve_slot(mode, bound_label, train_opt, desire_time,
+                                  DIRECTION_MAP[direction_label], date)
+        if ktx is None:
+            return f'⚠️ {info}'
+        direction = DIRECTION_MAP[direction_label]
+        d = _norm_date(date)
+        store.add_carpool_request((name or '학생').strip(), direction, ktx, d)
+        groups = form_carpool_groups(store)
+        mine = [g for g in groups if (name or '학생').strip() in g['members']
+                and g['direction'] == direction and g['ktx_time'] == ktx
+                and g['travel_date'] == d]
+        if mine:
+            return '🚕 카풀 신청 완료!\n\n' + group_message(mine[0])
+        return '🚕 카풀 신청 완료! (그룹 편성 대기)'
+
+    def on_carpool_finalize():
+        groups = form_carpool_groups(store, finalize=True)
+        if not groups:
+            return '카풀 신청 없음'
+        return '### 🚕 카풀 그룹 확정 결과\n' + '\n'.join(
+            f'- {group_message(g)}' for g in groups)
+
     def on_recommend_only(name, direction_label, mode, bound_label, train_opt, desire_time, date):
         ktx, info = _resolve_slot(mode, bound_label, train_opt, desire_time,
                                   DIRECTION_MAP[direction_label], date)
@@ -162,6 +187,12 @@ def build_student_app(store, fare=POLICY_FARE):
 
         gr.Markdown('---')
         with gr.Row():
+            carpool_btn = gr.Button('🚕 카풀 신청')
+            carpool_final_btn = gr.Button('🚕 카풀 지금 확정 (데모)')
+        carpool_out = gr.Markdown('카풀 신청 시 같은 시각 인원으로 최대 4명 그룹이 편성됩니다.')
+
+        gr.Markdown('---')
+        with gr.Row():
             notif_check_btn = gr.Button('🔔 지금 알림 체크')
             delay_btn = gr.Button('⚠️ 지연 시뮬레이션 (데모)')
         notif_out = gr.Markdown('🔔 알림 없음')
@@ -174,6 +205,8 @@ def build_student_app(store, fare=POLICY_FARE):
                         status_out)
         reserve_btn.click(on_reserve, common, [rec_out, status_out, notif_out])
         rec_btn.click(on_recommend_only, common, [rec_out, status_out])
+        carpool_btn.click(on_carpool_signup, common, carpool_out)
+        carpool_final_btn.click(on_carpool_finalize, None, carpool_out)
         notif_check_btn.click(do_check, None, notif_out)
         delay_btn.click(do_delay, None, notif_out)
 

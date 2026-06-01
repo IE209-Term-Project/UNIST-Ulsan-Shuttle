@@ -24,14 +24,16 @@ def _weekday_of(travel_date):
 
 
 def taxi_share_logic(store, direction, ktx_time, travel_date, exclude_name=None):
-    """같은 슬롯 예약자 기반 택시 셰어 후보 집계. 순수 로직(store 주입)."""
+    """같은 슬롯 예약자 기반 택시 카풀 후보 집계. 택시 정원 4명 상한 + 시간대 할증 반영."""
+    from shuttle_system.agents.carpool_agent import fare_for_time, TAXI_CAPACITY
     names = [n for n in store.names(direction, ktx_time, travel_date)
              if n != exclude_name]
-    n = len(names) + 1  # 본인 포함
-    per_person = round(14000 / n) if n > 0 else 14000
-    return {'companions': names, 'group_size': n,
-            'est_total_krw': 14000, 'per_person_krw': per_person,
-            'note': f'같은 {ktx_time} KTX 예약자 {len(names)}명 → {n}명 셰어 시 1인 약 {per_person}원'}
+    group = min(len(names) + 1, TAXI_CAPACITY)  # 본인 포함, 정원 4 상한
+    fare = fare_for_time(ktx_time)
+    per_person = round(fare / group) if group > 0 else fare
+    return {'companions': names, 'group_size': group, 'taxi_capacity': TAXI_CAPACITY,
+            'est_total_krw': fare, 'per_person_krw': per_person,
+            'note': f'같은 {ktx_time} 예약자 {len(names)}명 → {group}명(최대4) 카풀 시 1인 약 {per_person}원'}
 
 
 def _do_reserve(store, name, direction, ktx_time, travel_date):

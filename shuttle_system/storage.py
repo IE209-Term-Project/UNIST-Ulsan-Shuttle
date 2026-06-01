@@ -18,6 +18,8 @@ from shuttle_system import config  # noqa: F401
 HEADER = ['name', 'direction', 'ktx_time', 'travel_date', 'created_at']
 NOTIF_HEADER = ['created_at', 'type', 'direction', 'ktx_time', 'travel_date', 'message']
 NOTIF_SHEET = 'notifications'
+CARPOOL_HEADER = ['created_at', 'name', 'direction', 'ktx_time', 'travel_date']
+CARPOOL_SHEET = 'carpool'
 
 # Google Sheets API 권한 범위 (시트 읽기/쓰기 + 이름으로 열기)
 GSPREAD_SCOPES = [
@@ -37,6 +39,7 @@ class MemoryReservationStore:
     def __init__(self):
         self._rows = []
         self._notifs = []
+        self._carpool = []
 
     def add_notification(self, rec):
         r = {'created_at': datetime.now().isoformat(timespec='seconds'), **rec}
@@ -45,6 +48,14 @@ class MemoryReservationStore:
 
     def all_notifications(self):
         return list(self._notifs)
+
+    def add_carpool_request(self, name, direction, ktx_time, travel_date):
+        self._carpool.append({'created_at': datetime.now().isoformat(timespec='seconds'),
+                              'name': (name or '익명').strip(), 'direction': direction,
+                              'ktx_time': ktx_time, 'travel_date': travel_date})
+
+    def all_carpool_requests(self):
+        return list(self._carpool)
 
     def add(self, name, direction, ktx_time, travel_date):
         self._rows.append({'name': (name or '익명').strip(), 'direction': direction,
@@ -100,6 +111,26 @@ class _SheetsStoreBase:
     def all_notifications(self):
         return self.notif_ws.get_all_records()
 
+    def _ensure_carpool_ws(self, sh):
+        import gspread
+        try:
+            self.carpool_ws = sh.worksheet(CARPOOL_SHEET)
+        except gspread.WorksheetNotFound:
+            self.carpool_ws = sh.add_worksheet(CARPOOL_SHEET, rows=1000,
+                                               cols=len(CARPOOL_HEADER))
+        vals = self.carpool_ws.get_all_values()
+        if not vals or vals[0] != CARPOOL_HEADER:
+            self.carpool_ws.clear()
+            self.carpool_ws.append_row(CARPOOL_HEADER, value_input_option='RAW')
+
+    def add_carpool_request(self, name, direction, ktx_time, travel_date):
+        self.carpool_ws.append_row(
+            [datetime.now().isoformat(timespec='seconds'), (name or '익명').strip(),
+             direction, ktx_time, travel_date], value_input_option='RAW')
+
+    def all_carpool_requests(self):
+        return self.carpool_ws.get_all_records()
+
     def add(self, name, direction, ktx_time, travel_date):
         self.ws.append_row([(name or '익명').strip(), direction, ktx_time, travel_date,
                             datetime.now().isoformat(timespec='seconds')],
@@ -153,6 +184,7 @@ class SheetsReservationStore(_SheetsStoreBase):
         self.url = sh.url
         self._ensure_header()
         self._ensure_notif_ws(sh)
+        self._ensure_carpool_ws(sh)
 
 
 class ServiceAccountSheetsStore(_SheetsStoreBase):
@@ -197,6 +229,7 @@ class ServiceAccountSheetsStore(_SheetsStoreBase):
         self.url = sh.url
         self._ensure_header()
         self._ensure_notif_ws(sh)
+        self._ensure_carpool_ws(sh)
 
 
 def make_store():

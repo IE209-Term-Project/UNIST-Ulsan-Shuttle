@@ -17,6 +17,7 @@ from shuttle_system.storage import make_store
 from shuttle_system.core.optimization import breakeven_N
 from shuttle_system.agents.report_agent import compute_operations_report, narrate_report
 from shuttle_system.agents.alert_agent import run_notification_check, llm_compose
+from shuttle_system.agents.carpool_agent import form_carpool_groups, group_message
 
 st.set_page_config(page_title='UNIST 셔틀 운영 리포트', page_icon='🛠', layout='wide')
 
@@ -113,6 +114,18 @@ if ca.button('지금 알림 체크'):
 if cb.button('⚠️ 지연 시뮬레이션 (데모)'):
     new = run_notification_check(store, fare=fare, simulate_delay=True, composer=llm_compose)
     st.success(f'{len(new)}건 생성(지연 포함)')
+
+
+# ── 🚕 카풀 그룹 ────────────────────────────────────
+st.divider()
+st.subheader('🚕 카풀 그룹')
+finalize = st.checkbox('지금 확정(출발 15분 전 가정)', value=False)
+groups = form_carpool_groups(store, finalize=finalize)
+if not groups:
+    st.caption('카풀 신청 없음')
+else:
+    for g in groups:
+        st.write(group_message(g))
 
 
 @st.fragment(run_every=15)
