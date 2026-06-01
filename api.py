@@ -149,14 +149,14 @@ def api_carpool_finalize():
 # ── 알림 ─────────────────────────────────────────────
 @app.get('/api/notifications')
 def api_notifications(name: str = None):
-    """내 알림: 이름이 주어지면 그 사람이 예약한 슬롯의 알림만."""
-    notes = store.all_notifications()
-    if name and name.strip():
-        mine = {(str(r.get('direction')), str(r.get('ktx_time')), str(r.get('travel_date')))
-                for r in store.all_records() if str(r.get('name')) == name.strip()}
-        notes = [n for n in notes
-                 if (str(n.get('direction')), str(n.get('ktx_time')),
-                     str(n.get('travel_date'))) in mine]
+    """내 알림: 그 사람이 예약한 슬롯의 알림만. 이름 없으면 빈 목록."""
+    if not (name and name.strip()):
+        return {'notifications': []}
+    mine = {(str(r.get('direction')), str(r.get('ktx_time')), str(r.get('travel_date')))
+            for r in store.all_records() if str(r.get('name')) == name.strip()}
+    notes = [n for n in store.all_notifications()
+             if (str(n.get('direction')), str(n.get('ktx_time')),
+                 str(n.get('travel_date'))) in mine]
     return {'notifications': [n.get('message', '') for n in notes[-12:][::-1]]}
 
 
