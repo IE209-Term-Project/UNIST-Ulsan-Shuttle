@@ -13,6 +13,9 @@ import os
 
 import requests
 
+# .env 자동 로드 보장(config import의 부수효과). 없으면 토큰 환경변수를 못 읽는다.
+from shuttle_system import config  # noqa: F401
+
 MEMO_URL = 'https://kapi.kakao.com/v2/api/talk/memo/default/send'
 TOKEN_URL = 'https://kauth.kakao.com/oauth/token'
 

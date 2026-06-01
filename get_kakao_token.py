@@ -11,13 +11,15 @@ import requests
 
 
 def main():
-    if len(sys.argv) != 4:
-        print('usage: python get_kakao_token.py <REST_API_KEY> <REDIRECT_URI> <CODE>')
+    if len(sys.argv) not in (4, 5):
+        print('usage: python get_kakao_token.py <REST_API_KEY> <REDIRECT_URI> <CODE> [CLIENT_SECRET]')
         sys.exit(1)
     rest_key, redirect_uri, code = sys.argv[1], sys.argv[2], sys.argv[3]
-    resp = requests.post('https://kauth.kakao.com/oauth/token', data={
-        'grant_type': 'authorization_code', 'client_id': rest_key,
-        'redirect_uri': redirect_uri, 'code': code}, timeout=10)
+    payload = {'grant_type': 'authorization_code', 'client_id': rest_key,
+               'redirect_uri': redirect_uri, 'code': code}
+    if len(sys.argv) == 5:
+        payload['client_secret'] = sys.argv[4]
+    resp = requests.post('https://kauth.kakao.com/oauth/token', data=payload, timeout=10)
     data = resp.json()
     if resp.status_code != 200:
         print('실패:', data)
