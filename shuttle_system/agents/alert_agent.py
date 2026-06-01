@@ -40,7 +40,7 @@ def detect_events(store, fare=POLICY_FARE, simulate_delay=False):
         if slot['service'] == 'conditional' and count >= n_star:
             events.append({'type': 'dispatch', 'direction': direction, 'ktx_time': ktx,
                            'travel_date': date, 'slot': slot.get('slot', ''), 'count': count,
-                           'n_star': n_star})
+                           'n_star': n_star, 'shuttle_time': slot.get('shuttle_time', '')})
         if not running and count >= 2:
             from shuttle_system.agents.carpool_agent import fare_for_time, TAXI_CAPACITY
             group = min(count, TAXI_CAPACITY)
@@ -54,17 +54,34 @@ def detect_events(store, fare=POLICY_FARE, simulate_delay=False):
     return events
 
 
+_WD = '월화수목금토일'
+
+
+def _fmt_date(date):
+    """'2026-06-05' -> '6/5(금)'."""
+    try:
+        dt = datetime.strptime(str(date).strip(), '%Y-%m-%d')
+        return f'{dt.month}/{dt.day}({_WD[dt.weekday()]})'
+    except ValueError:
+        return str(date)
+
+
 def _template_message(e):
     d = '울산역행' if e['direction'] == 'to_station' else '캠퍼스행'
+    when = f"{_fmt_date(e['travel_date'])} {e['ktx_time']}"
     if e['type'] == 'dispatch':
-        return (f"🚌 [운행 확정] {e['travel_date']} {e['ktx_time']} {d} 셔틀이 예약 "
-                f"{e['count']}명(N*={e['n_star']})으로 운행 확정되었습니다!")
+        st = e.get('shuttle_time', '')
+        depart = f"셔틀 {st} 출발" if st else "셔틀"
+        return (f"🚌 [셔틀 운행 확정] {when} {d} 조건부 셔틀이 예약 {e['count']}명"
+                f"(기준 {e['n_star']}명 이상) 충족으로 운행 확정되었습니다. "
+                f"{depart} 예정이니 시간 맞춰 정류장으로 오세요!")
     if e['type'] == 'carpool':
-        return (f"🚕 [카풀 가능] {e['travel_date']} {e['ktx_time']} {d}, 같은 시각 {e['count']}명이 "
-                f"있어요. 택시 카풀 시 1인 약 {e['per_person']:,}원!")
+        return (f"🚕 [카풀 매칭 가능] {when} {d}, 같은 시각 이동 {e['count']}명이 모였습니다. "
+                f"셔틀 미운행 구간이라 택시 카풀을 추천해요 — 4명 기준 1인 약 "
+                f"{e['per_person']:,}원. 앱에서 '🚕 카풀 신청'을 누르면 그룹에 자동 편성됩니다.")
     if e['type'] == 'delay':
-        return (f"⚠️ [지연 경고] {e['ktx_time']} {d} 연계 513이 지연 중입니다. "
-                f"약 {e['delay_min']}분 일찍 출발하세요.")
+        return (f"⚠️ [지연 경고] {when} {d} 연계 513 버스가 약 {e['delay_min']}분 지연되고 있어요. "
+                f"셔틀·택시를 이용하거나 {e['delay_min']}분 일찍 정류장으로 출발하세요.")
     return str(e)
 
 

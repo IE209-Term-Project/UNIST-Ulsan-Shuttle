@@ -85,13 +85,30 @@ def form_carpool_groups(store, now=None, finalize=False):
     return groups
 
 
+_WD = '월화수목금토일'
+
+
+def _fmt_date(date):
+    from datetime import datetime as _dtm
+    try:
+        dt = _dtm.strptime(str(date).strip(), '%Y-%m-%d')
+        return f'{dt.month}/{dt.day}({_WD[dt.weekday()]})'
+    except ValueError:
+        return str(date)
+
+
 def group_message(g):
     """그룹을 사람 말 알림으로(템플릿)."""
     d = '울산역행' if g['direction'] == 'to_station' else '캠퍼스행'
+    when = f"{_fmt_date(g['travel_date'])} {g['ktx_time']}"
+    members = ', '.join(g['members'])
     if g['status'] == 'no_carpool':
-        return (f"🚕 {g['travel_date']} {g['ktx_time']} {d} 카풀: 신청자가 1명뿐이라 "
-                f"미성사 → 단독 택시/513 이용 안내")
-    head = '확정' if g['status'] == 'confirmed' else '모집 중'
-    return (f"🚕 [카풀 {head}] {g['travel_date']} {g['ktx_time']} {d} 그룹{g['group_no']} "
-            f"({g['size']}/{TAXI_CAPACITY}명) · {g['place']} {g['meet_from']}~{g['meet_to']} "
-            f"· 1인 약 {g['per_person']:,}원")
+        return (f"🚕 [카풀 미성사] {when} {d}: 현재 신청자 1명뿐이라 카풀이 성사되지 않았어요. "
+                f"단독 택시 또는 513 버스를 이용해 주세요.")
+    if g['status'] == 'confirmed':
+        return (f"🚕 [카풀 확정] {when} {d} {g['group_no']}조 ({g['size']}명: {members}) — "
+                f"📍{g['place']}에서 {g['meet_from']}~{g['meet_to']} 사이 만나 출발하세요. "
+                f"1인 약 {g['per_person']:,}원(택시요금 ÷ {g['size']}명).")
+    return (f"🚕 [카풀 모집 중] {when} {d} {g['group_no']}조 ({g['size']}/{TAXI_CAPACITY}명) — "
+            f"📍{g['place']} {g['meet_from']}~{g['meet_to']} · 현재 1인 약 {g['per_person']:,}원. "
+            f"출발 15분 전 최종 확정됩니다.")
