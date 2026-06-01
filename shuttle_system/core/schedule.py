@@ -62,6 +62,32 @@ def find_shuttle_slot(direction, ktx_time, weekday, reservations=0, fare=POLICY_
             'note': '해당 요일/KTX 시각에 배정된 셔틀편 없음 → 513/택시 검토'}
 
 
+def _to_min(hhmm):
+    h, m = hhmm.strip().split(':')
+    return int(h) * 60 + int(m)
+
+
+def find_shuttle_near(direction, desired_time, weekday, window_min=30, fare=POLICY_FARE):
+    """기차 없이 '출발 희망 시각'에 가장 가까운 셔틀 슬롯을 찾는다(셔틀 출발시각 기준).
+
+    window_min 이내 최근접 슬롯을 반환. 예약은 그 슬롯의 ktx_time 키로 합류시킨다.
+    """
+    target = _to_min(desired_time)
+    best = None
+    for svc, table in (('fixed', SHUTTLE_FIXED), ('conditional', SHUTTLE_CONDITIONAL)):
+        for e in table.get(direction, []):
+            if e['wd'] != weekday:
+                continue
+            diff = abs(_to_min(e['shuttle']) - target)
+            if diff <= window_min and (best is None or diff < best['diff_min']):
+                best = {'found': True, 'service': svc, 'slot': e['slot'],
+                        'shuttle_time': e['shuttle'], 'ktx_time': e['ktx'],
+                        'diff_min': diff}
+    if best is None:
+        return {'found': False, 'note': f'출발 희망 {desired_time} 근방 {window_min}분 내 셔틀 없음'}
+    return best
+
+
 def all_slots():
     """리포트용: (service, direction, slot dict) 전체 평탄화."""
     out = []

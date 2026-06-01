@@ -1,77 +1,153 @@
-"""학생용 Gradio 앱 — 예약 + 개인화 추천."""
+"""학생용 Gradio 앱 — 시간표 기반 선택 + 예약 + 개인화 추천.
+
+입력 모드 2종:
+  A. 기차 연계 — 방면 선택 → KTX/SRT 시각 드롭다운
+  B. 단순 이동 — 출발 희망 시각 입력 → 근방 셔틀 매칭
+시각/시각 선택 시 그 슬롯의 현재 예약 인원을 표시한다.
+"""
 from datetime import datetime
 import gradio as gr
 
 from shuttle_system.core.optimization import breakeven_N, POLICY_FARE
+from shuttle_system.core.schedule import find_shuttle_near
 from shuttle_system.agents.notify_agent import NotifyAgent, StudentProfile
+from shuttle_system import timetable
 
 DIRECTION_MAP = {
-    '울산역 방향 (캠퍼스→역, KTX 타러)': 'to_station',
-    '캠퍼스 방향 (역→캠퍼스, KTX 하차 후)': 'to_campus',
+    '울산역 방향 (캠퍼스→역)': 'to_station',
+    '캠퍼스 방향 (역→캠퍼스)': 'to_campus',
 }
+MODE_TRAIN = '기차 연계 (KTX/SRT 시각 선택)'
+MODE_TIME = '단순 이동 (출발 희망 시각 입력)'
+BOUND_BY_LABEL = {v: k for k, v in timetable.BOUND_LABEL.items()}
+
+
+def _weekday(date_str):
+    return datetime.strptime(date_str.strip(), '%Y-%m-%d').weekday()
 
 
 def build_student_app(store, fare=POLICY_FARE):
     agent = NotifyAgent(store, fare=fare)
     n_star = breakeven_N(fare)
 
-    def _norm(label, travel_date):
-        direction = DIRECTION_MAP[label]
-        travel_date = (travel_date or '').strip() or datetime.now().strftime('%Y-%m-%d')
-        return direction, travel_date
+    def _norm_date(date):
+        return (date or '').strip() or datetime.now().strftime('%Y-%m-%d')
 
-    def _status(label, ktx, date):
-        if not (ktx and ktx.strip()):
-            return '예약 현황: KTX 시각을 입력하세요.'
-        direction, date = _norm(label, date)
-        ktx = ktx.strip()
+    def _resolve_slot(mode, bound_label, train_opt, desire_time, direction, date):
+        """입력 모드에 따라 예약 키가 될 ktx_time과 설명을 결정.
+
+        returns (ktx_time or None, 설명문). ktx_time None이면 에러/안내.
+        """
+        date = _norm_date(date)
+        if mode == MODE_TRAIN:
+            if not train_opt:
+                return None, '열차 시각을 선택하세요.'
+            ktx = timetable.parse_time(train_opt)
+            return ktx, f'선택 열차: {train_opt}'
+        # MODE_TIME
+        if not (desire_time and desire_time.strip()):
+            return None, '출발 희망 시각(HH:MM)을 입력하세요.'
+        try:
+            wd = _weekday(date)
+        except ValueError:
+            return None, '날짜 형식 오류 (YYYY-MM-DD).'
+        near = find_shuttle_near(direction, desire_time.strip(), wd, fare=fare)
+        if near['found']:
+            return near['ktx_time'], (f"가장 가까운 셔틀 {near['shuttle_time']} "
+                                      f"({near['diff_min']}분 차, {near['slot']})")
+        return desire_time.strip(), '근방 30분 내 셔틀 없음 → 513/택시/카풀 검토'
+
+    def _status(direction_label, ktx, date):
+        direction = DIRECTION_MAP[direction_label]
+        date = _norm_date(date)
         n = store.count(direction, ktx, date)
         names = store.names(direction, ktx, date)
         flag = '✅ 배차 충족' if n >= n_star else f'{max(0, n_star - n)}명 더 필요'
-        return (f'📋 {date} · {ktx} · {label}\n예약 {n}/{n_star}명 ({flag})\n'
+        return (f'📋 {date} · {ktx} · {direction_label}\n예약 {n}/{n_star}명 ({flag})\n'
                 f'예약자: {", ".join(names) or "없음"}')
 
-    def _recommend(name, label, ktx, date):
-        direction, date = _norm(label, date)
-        ktx = ktx.strip()
+    # ── 드롭다운 동적 갱신 / 모드 토글 ───────────────────
+    def on_bound_change(bound_label):
+        opts = timetable.train_options(BOUND_BY_LABEL[bound_label])
+        return gr.update(choices=opts, value=(opts[0] if opts else None))
+
+    def on_mode_change(mode):
+        is_train = (mode == MODE_TRAIN)
+        return (gr.update(visible=is_train), gr.update(visible=is_train),
+                gr.update(visible=not is_train))
+
+    def on_check(direction_label, mode, bound_label, train_opt, desire_time, date):
+        ktx, info = _resolve_slot(mode, bound_label, train_opt, desire_time,
+                                  DIRECTION_MAP[direction_label], date)
+        if ktx is None:
+            return f'⚠️ {info}'
+        return f'{info}\n\n' + _status(direction_label, ktx, date)
+
+    def _recommend(name, direction_label, ktx, date):
+        direction = DIRECTION_MAP[direction_label]
+        date = _norm_date(date)
         n = store.count(direction, ktx, date)
         profile = StudentProfile(name=(name or '학생').strip(), direction=direction,
                                  ktx_time=ktx, travel_date=date, current_reservations=n)
         try:
             return agent.generate(profile)
         except Exception as e:
-            return f'❌ 처리 중 오류: {e}\n입력 형식 확인 (KTX HH:MM, 날짜 YYYY-MM-DD).'
+            return f'❌ 처리 중 오류: {e}'
 
-    def on_reserve(name, label, ktx, date):
-        if not (ktx and ktx.strip()):
-            return '⚠️ KTX 시각(HH:MM)을 입력하세요.', '예약 현황: -'
-        direction, d = _norm(label, date)
-        store.add(name, direction, ktx.strip(), d)
-        return _recommend(name, label, ktx, date), _status(label, ktx, date)
+    def on_reserve(name, direction_label, mode, bound_label, train_opt, desire_time, date):
+        ktx, info = _resolve_slot(mode, bound_label, train_opt, desire_time,
+                                  DIRECTION_MAP[direction_label], date)
+        if ktx is None:
+            return f'⚠️ {info}', '예약 현황: -'
+        direction = DIRECTION_MAP[direction_label]
+        d = _norm_date(date)
+        store.add(name, direction, ktx, d)
+        return (info + '\n\n' + _recommend(name, direction_label, ktx, d),
+                _status(direction_label, ktx, d))
 
-    def on_recommend_only(name, label, ktx, date):
-        if not (ktx and ktx.strip()):
-            return '⚠️ KTX 시각(HH:MM)을 입력하세요.', '예약 현황: -'
-        return _recommend(name, label, ktx, date), _status(label, ktx, date)
+    def on_recommend_only(name, direction_label, mode, bound_label, train_opt, desire_time, date):
+        ktx, info = _resolve_slot(mode, bound_label, train_opt, desire_time,
+                                  DIRECTION_MAP[direction_label], date)
+        if ktx is None:
+            return f'⚠️ {info}', '예약 현황: -'
+        d = _norm_date(date)
+        return (info + '\n\n' + _recommend(name, direction_label, ktx, d),
+                _status(direction_label, ktx, d))
+
+    default_bound = timetable.BOUND_LABEL['seoul_bound']
+    init_opts = timetable.train_options('seoul_bound')
 
     with gr.Blocks(title='UNIST 셔틀 추천 (학생용)') as demo:
         gr.Markdown(f'## 🚌 UNIST ↔ 울산역 추천 + 예약\n'
-                    f'셔틀 → 513 → 택시 우선순위. **조건부 셔틀은 예약 N\\*={n_star}명 이상**이면 배차.')
+                    f'셔틀 → 513 → 택시/카풀 우선순위. **조건부 셔틀은 예약 N\\*={n_star}명 이상**이면 배차. '
+                    f'(시간표 {timetable.updated_date()} 기준)')
         with gr.Row():
             name_in = gr.Textbox(label='이름', placeholder='홍길동')
             dir_in = gr.Radio(list(DIRECTION_MAP), label='방향',
-                              value='울산역 방향 (캠퍼스→역, KTX 타러)')
+                              value=list(DIRECTION_MAP)[0])
+        mode_in = gr.Radio([MODE_TRAIN, MODE_TIME], label='입력 방식', value=MODE_TRAIN)
         with gr.Row():
-            ktx_in = gr.Textbox(label='KTX 시각 (HH:MM)', placeholder='13:58')
-            date_in = gr.Textbox(label='날짜 (YYYY-MM-DD)',
-                                 value=datetime.now().strftime('%Y-%m-%d'))
+            bound_in = gr.Dropdown(list(timetable.BOUND_LABEL.values()), label='방면',
+                                   value=default_bound, visible=True)
+            train_in = gr.Dropdown(init_opts, label='열차 시각 (KTX/SRT)',
+                                   value=(init_opts[0] if init_opts else None), visible=True)
+            desire_in = gr.Textbox(label='출발 희망 시각 (HH:MM)', placeholder='13:30',
+                                   visible=False)
+        date_in = gr.Textbox(label='날짜 (YYYY-MM-DD)',
+                             value=datetime.now().strftime('%Y-%m-%d'))
         with gr.Row():
+            check_btn = gr.Button('🔍 이 시각 예약 현황')
             reserve_btn = gr.Button('✅ 예약하고 추천', variant='primary')
             rec_btn = gr.Button('🔎 추천만 보기')
-        status_out = gr.Textbox(label='예약 현황', lines=3)
+        status_out = gr.Textbox(label='예약 현황', lines=4)
         rec_out = gr.Textbox(label='추천 결과', lines=5)
 
-        full = [name_in, dir_in, ktx_in, date_in]
-        reserve_btn.click(on_reserve, full, [rec_out, status_out])
-        rec_btn.click(on_recommend_only, full, [rec_out, status_out])
+        bound_in.change(on_bound_change, bound_in, train_in)
+        mode_in.change(on_mode_change, mode_in, [bound_in, train_in, desire_in])
+        common = [name_in, dir_in, mode_in, bound_in, train_in, desire_in, date_in]
+        check_btn.click(on_check,
+                        [dir_in, mode_in, bound_in, train_in, desire_in, date_in],
+                        status_out)
+        reserve_btn.click(on_reserve, common, [rec_out, status_out])
+        rec_btn.click(on_recommend_only, common, [rec_out, status_out])
     return demo
