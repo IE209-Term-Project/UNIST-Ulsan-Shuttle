@@ -20,7 +20,10 @@ def test_conditional_below_threshold_books_and_pending():
     assert r['reservations'] == 7        # 6 + 1
     assert r['required'] == 8
     assert '7/8' in r['message']
-    assert '잠정' in r['message']         # 마감 후 확정 모델
+    assert '1명' in r['message']           # 1명 더 모이면
+    assert '신규' in r['message']          # 이름 인용
+    assert '잠정' in r['message']
+    assert '카카오톡' in r['message']      # 마감 카톡 안내
 
 
 def test_conditional_reaching_threshold_confirms():
@@ -32,6 +35,7 @@ def test_conditional_reaching_threshold_confirms():
     # 마감 전엔 잠정, 단 N* 충족 메시지 포함
     assert '잠정' in r['message']
     assert '8/8' in r['message']
+    assert '카카오톡' in r['message']
 
 
 def test_no_slot_recommends_alt_no_booking():

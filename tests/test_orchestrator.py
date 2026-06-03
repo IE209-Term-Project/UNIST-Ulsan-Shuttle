@@ -1,6 +1,9 @@
-"""Orchestrator 통합 테스트 — LLM 실패 시 결정론 폴백으로 예약·감지가 보장되는지."""
+"""Orchestrator 모듈 보존 테스트 (현재 메인 흐름에선 미사용, 팀원 작업·확장용으로 유지)."""
+import pytest
 from shuttle_system.storage import MemoryReservationStore
 from shuttle_system.agents.orchestrator import Orchestrator
+
+pytestmark = pytest.mark.skip(reason='Orchestrator는 메인 흐름에서 제외(메시지 왜곡 위험). 모듈만 보존.')
 
 
 def test_orchestrator_falls_back_and_books(monkeypatch):

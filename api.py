@@ -28,21 +28,9 @@ store = make_store()
 FARE = POLICY_FARE
 WEB = Path(__file__).parent / 'web'
 
-# Orchestrator(LLM planner) — 키 없으면 None → 결정론 경로로 폴백
-try:
-    from shuttle_system.agents.orchestrator import Orchestrator
-    orchestrator = Orchestrator(store, fare=FARE, pusher=kakao_send)
-except Exception:
-    orchestrator = None
-
-# 에이전트 trace를 사람이 읽을 라벨로
-TRACE_LABEL = {
-    'recommend_transport': '추천 에이전트',
-    'detect_and_notify': '알림 에이전트',
-    'form_carpool': '카풀 에이전트',
-    'fallback:recommend': '추천 에이전트(결정론)',
-    'fallback:detect_and_notify': '알림 에이전트(결정론)',
-}
+# 결정론 멀티 에이전트 흐름 (LLM 미사용). LLM은 운영 리포트 서술 등 안전한 영역에만.
+# Orchestrator(LLM planner)는 메시지 왜곡 위험으로 메인 흐름에서 제외했다.
+# 코드가 trace를 명시적으로 만들어 화면에 표시한다.
 
 
 def _today():
@@ -90,35 +78,21 @@ class ReserveReq(StatusReq):
 @app.post('/api/reserve')
 def api_reserve(req: ReserveReq):
     date = (req.travel_date or '').strip() or _today()
-    if orchestrator is not None:
-        # Orchestrator(LLM planner)가 어떤 하위 에이전트를 부를지 판단 → 예약 처리
-        before = len(store.all_notifications())
-        res = orchestrator.handle(req.name, req.direction, req.mode,
-                                  _opt_time(req.train_time), req.desire_time, date, intent='reserve')
-        if not res.get('ok'):
-            return JSONResponse({'ok': False, 'info': res.get('info', '입력 확인')}, status_code=400)
-        ktx, date = res['ktx_time'], res['travel_date']
-        run_notification_check(store, fare=FARE, pusher=kakao_send)   # 알림 보장(중복 차단)
-        new_msgs = [n.get('message', '') for n in store.all_notifications()[before:]]
-        st = slot_status(store, req.direction, ktx, date, FARE)
-        # 연속 중복 호출은 하나로 합쳐 표시
-        trace = []
-        for t in res.get('trace', []):
-            label = TRACE_LABEL.get(t, t)
-            if not trace or trace[-1] != label:
-                trace.append(label)
-        return {'ok': True, 'ktx_time': ktx, 'travel_date': date, 'info': res.get('info', ''),
-                'message': res['message'], 'trace': trace, 'new_alerts': new_msgs, **st}
-    # 폴백: orchestrator 불가 → 결정론
+    # 1) 추천/예약 에이전트 — 결정론
     ktx, info = resolve_ktx(store, req.direction, req.mode,
                             _opt_time(req.train_time), req.desire_time, date, FARE)
     if ktx is None:
         return JSONResponse({'ok': False, 'info': info}, status_code=400)
     rec = recommend(store, req.name, req.direction, ktx, date, FARE)
-    new = run_notification_check(store, fare=FARE, pusher=kakao_send)
+    trace = ['추천 에이전트']
+    # 2) 알림 에이전트 — 능동 감지(예약 직후) + 카톡 발송
+    before = len(store.all_notifications())
+    run_notification_check(store, fare=FARE, pusher=kakao_send)
+    new_msgs = [n.get('message', '') for n in store.all_notifications()[before:]]
+    if new_msgs:
+        trace.append('알림 에이전트')
     return {'ok': True, 'ktx_time': ktx, 'info': info, 'travel_date': date,
-            'trace': ['추천 에이전트(결정론)', '알림 에이전트(결정론)'],
-            'new_alerts': [n['message'] for n in new], **rec}
+            'trace': trace, 'new_alerts': new_msgs, **rec}
 
 
 # ── 카풀 ─────────────────────────────────────────────

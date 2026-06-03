@@ -111,23 +111,30 @@ def recommend(store, name, direction, ktx_time, travel_date, fare=POLICY_FARE, d
                             f"{share['per_person_krw']:,}원) 또는 513 버스를 이용하세요.")}
 
     if service == 'fixed':
+        nm = (name or '학생').strip()
         return {'mode': 'shuttle', 'booked': booked, 'reservations': count, 'required': None,
                 'service': service, 'shuttle_time': slot['shuttle_time'], 'phase': phase,
-                'message': f"✅ 예약 완료! {ktx_time} {dir_kr} 고정 셔틀이 "
-                           f"{slot['shuttle_time']}에 출발합니다. 시간 맞춰 정류장으로 오세요."}
+                'message': (f"✅ {nm}님의 예약이 확정되었습니다.\n"
+                            f"{ktx_time} {dir_kr} 고정 셔틀이 {slot['shuttle_time']}에 출발합니다.\n"
+                            f"시간 맞춰 정류장으로 와주세요.")}
 
     if service == 'conditional':
-        soon = ' (마감 임박!)' if phase == 'closing_soon' else ''
+        soon = ' ⏰ (마감 임박)' if phase == 'closing_soon' else ''
+        nm = (name or '학생').strip()
         if count >= n_star:
-            msg = (f"📝 잠정 예약 완료! 현재 {count}/{n_star}명 충족 — 마감(출발 {CUTOFF_HOURS}시간 전) "
-                   f"시 단일 차량 가능하면 {slot['shuttle_time']} 셔틀 **확정**됩니다.{soon} "
-                   f"확정/미운행은 마감 시 카톡으로 알려드려요.")
+            msg = (f"📝 {nm}님의 예약이 잠정 접수되었습니다.\n"
+                   f"현재 {count}/{n_star}명이 모여 운행 기준을 충족했습니다.{soon}\n\n"
+                   f"📨 출발 {CUTOFF_HOURS}시간 전 마감 시점에 최종 운행 확정 여부를 "
+                   f"카카오톡으로 알려드립니다. (셔틀 차량 일정에 따라 미운행될 수 있어요.)")
         else:
-            share = taxi_share_logic(store, direction, ktx_time, travel_date)
-            msg = (f"📝 잠정 예약 접수! 현재 {count}/{n_star}명 — {n_star - count}명 더 모이면 "
-                   f"마감 시 {slot['shuttle_time']} 셔틀이 확정됩니다.{soon} 미달 시 같은 시각 "
-                   f"{share['group_size']}명과 택시 카풀(1인 약 {share['per_person_krw']:,}원·최대 4명) "
-                   f"또는 513 버스 안내가 카톡으로 갑니다.")
+            need = n_star - count
+            msg = (f"📝 {nm}님의 예약이 잠정 접수되었습니다.\n"
+                   f"현재 {count}/{n_star}명 — {need}명이 더 모이면 "
+                   f"{slot['shuttle_time']} 셔틀이 확정됩니다.{soon}\n\n"
+                   f"인원이 부족하면 같은 시각에 출발하는 다른 학생들과 "
+                   f"택시 카풀(최대 4명·1인 약 2,500~5,000원) 또는 513 버스를 이용할 수 있어요.\n\n"
+                   f"📨 출발 {CUTOFF_HOURS}시간 전 마감 시점에 운행 확정/미운행 여부를 "
+                   f"카카오톡으로 알려드립니다.")
         return {'mode': 'shuttle', 'booked': booked, 'reservations': count,
                 'required': n_star, 'service': service, 'phase': phase,
                 'shuttle_time': slot['shuttle_time'], 'message': msg}
