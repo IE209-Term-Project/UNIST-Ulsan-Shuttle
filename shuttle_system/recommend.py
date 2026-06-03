@@ -9,7 +9,8 @@ from datetime import datetime
 
 from shuttle_system.core.optimization import breakeven_N, POLICY_FARE
 from shuttle_system.core.schedule import (
-    find_shuttle_slot, find_shuttle_near, slot_phase, VEHICLE_CAPACITY, CUTOFF_HOURS,
+    find_shuttle_slot, find_shuttle_near, slot_phase, grid_shuttle_time_for,
+    VEHICLE_CAPACITY, CUTOFF_HOURS,
 )
 from shuttle_system.agents.notify_agent import taxi_share_logic
 
@@ -33,15 +34,25 @@ def weekday_of(travel_date):
 
 
 def resolve_ktx(store, direction, mode, train_time, desire_time, travel_date, fare=POLICY_FARE):
-    """입력 모드에 따라 예약 키 ktx_time과 설명을 결정.
+    """입력을 그리드 셔틀 시각으로 변환.
 
-    mode='train' → train_time 그대로. mode='time' → 근방 셔틀 매칭.
-    returns (ktx_time or None, info_text).
+    mode='train' → KTX 시각 → 방향별 그리드의 가장 가까운 셔틀 시각으로 매핑
+    mode='time'  → 출발 희망 시각 → 가장 가까운 그리드 셔틀 시각
+    returns (shuttle_time_key or None, info_text).
     """
+    if mode == 'grid':
+        # 그리드 시각 직접 선택 (HH:MM)
+        if not train_time:
+            return None, '셔틀 시각을 선택하세요.'
+        return train_time.strip(), f'셔틀 {train_time.strip()} 선택'
     if mode == 'train':
         if not train_time:
             return None, '열차 시각을 선택하세요.'
-        return train_time.strip(), f'선택 시각 {train_time.strip()}'
+        kt = train_time.strip()
+        st = grid_shuttle_time_for(direction, kt)
+        if st is None:
+            return None, f'KTX {kt}에 매칭되는 셔틀이 없습니다 (운영 외 시간).'
+        return st, f'KTX {kt} → 셔틀 {st} 배정'
     if not (desire_time and desire_time.strip()):
         return None, '출발 희망 시각을 입력하세요.'
     try:
@@ -50,9 +61,9 @@ def resolve_ktx(store, direction, mode, train_time, desire_time, travel_date, fa
         return None, '날짜 형식 오류 (YYYY-MM-DD).'
     near = find_shuttle_near(direction, desire_time.strip(), wd, fare=fare)
     if near['found']:
-        return near['ktx_time'], (f"가장 가까운 셔틀 {near['shuttle_time']} "
-                                  f"({near['diff_min']}분 차)")
-    return desire_time.strip(), '근방 30분 내 셔틀 없음 → 513/택시/카풀 검토'
+        return near['shuttle_time'], (f"가장 가까운 셔틀 {near['shuttle_time']} "
+                                       f"({near['diff_min']}분 차)")
+    return None, '근방 60분 내 셔틀 없음 → 513/택시/카풀 검토'
 
 
 def slot_status(store, direction, ktx_time, travel_date, fare=POLICY_FARE):

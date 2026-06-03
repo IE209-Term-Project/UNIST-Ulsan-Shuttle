@@ -50,6 +50,20 @@ def api_timetable():
                 'options': timetable.train_options(b)} for b in timetable.bounds()}
 
 
+# ── 셔틀 그리드 (방향별) ─────────────────────────────
+@app.get('/api/grid')
+def api_grid():
+    from shuttle_system.core.schedule import grid_options, SHUTTLE_FIXED, WEEKDAY_KR
+    fixed = {d: [{'wd': e['wd'], 'wd_kr': WEEKDAY_KR[e['wd']],
+                  'shuttle': e['shuttle'], 'slot': e['slot']}
+                 for e in entries]
+             for d, entries in SHUTTLE_FIXED.items()}
+    return {
+        'to_station': {'grid': grid_options('to_station'), 'fixed': fixed['to_station']},
+        'to_campus': {'grid': grid_options('to_campus'), 'fixed': fixed['to_campus']},
+    }
+
+
 # ── 현황 조회 ────────────────────────────────────────
 class StatusReq(BaseModel):
     direction: str

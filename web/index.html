@@ -65,9 +65,10 @@
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-500 mb-2">입력 방식</label>
-        <div class="grid grid-cols-2 gap-2" id="mode">
+        <div class="grid grid-cols-3 gap-2" id="mode">
           <button data-v="train" class="mode-btn rounded-2xl py-3 text-sm font-medium bg-blue-600 text-white">기차 연계</button>
-          <button data-v="time" class="mode-btn rounded-2xl py-3 text-sm font-medium bg-gray-100">단순 이동</button>
+          <button data-v="time" class="mode-btn rounded-2xl py-3 text-sm font-medium bg-gray-100">희망 시각</button>
+          <button data-v="grid" class="mode-btn rounded-2xl py-3 text-sm font-medium bg-gray-100">셔틀 시각</button>
         </div>
       </div>
       <div id="trainBox">
@@ -85,6 +86,11 @@
       <div id="timeBox" class="hidden">
         <label class="block text-sm font-medium text-gray-500 mb-2">출발 희망 시각 (HH:MM)</label>
         <input id="desire" placeholder="13:40" class="w-full rounded-2xl bg-gray-100 px-4 py-3 outline-none focus:ring-2 ring-blue-500">
+      </div>
+      <div id="gridBox" class="hidden">
+        <label class="block text-sm font-medium text-gray-500 mb-2">셔틀 시각 (그리드)</label>
+        <select id="gridSel" class="w-full rounded-2xl bg-gray-100 px-4 py-3 outline-none"></select>
+        <p class="text-xs text-gray-400 mt-1">⭐ 표시된 시각 = 항상 운행되는 고정 셔틀</p>
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-500 mb-2">날짜</label>
@@ -171,17 +177,24 @@ function pickGroup(sel, value) {
     b.classList.toggle('bg-gray-100', !on);
   });
 }
-document.querySelectorAll('.dir-btn').forEach(b => b.onclick = () => { state.direction=b.dataset.v; pickGroup('.dir-btn', b.dataset.v); });
+document.querySelectorAll('.dir-btn').forEach(b => b.onclick = () => {
+  state.direction=b.dataset.v; pickGroup('.dir-btn', b.dataset.v);
+  if (state.mode==='grid') fillGrid();
+});
 document.querySelectorAll('.mode-btn').forEach(b => b.onclick = () => {
   state.mode=b.dataset.v; pickGroup('.mode-btn', b.dataset.v);
   $('trainBox').classList.toggle('hidden', b.dataset.v!=='train');
   $('timeBox').classList.toggle('hidden', b.dataset.v!=='time');
+  $('gridBox').classList.toggle('hidden', b.dataset.v!=='grid');
+  if (b.dataset.v==='grid') fillGrid();
 });
 
 let TT = {};
+let GRID = null;
 async function init() {
   $('date').value = new Date().toISOString().slice(0,10);
   TT = await (await fetch('/api/timetable')).json();
+  GRID = await (await fetch('/api/grid')).json();
   const bsel = $('bound');
   bsel.innerHTML = Object.entries(TT).map(([k,v]) => `<option value="${k}">${v.label}</option>`).join('');
   fillTrains();
@@ -250,9 +263,25 @@ function fillTrains() {
   const b = $('bound').value;
   $('train').innerHTML = (TT[b]?.options||[]).map(o => `<option value="${o}">${o}</option>`).join('');
 }
+function fillGrid() {
+  if (!GRID) return;
+  const dir = state.direction;
+  const date = $('date').value;
+  const wd = date ? (new Date(date).getDay() + 6) % 7 : -1;  // JS Sun=0 → Mon=0
+  const fixedSet = new Set((GRID[dir].fixed||[]).filter(f => f.wd===wd).map(f => f.shuttle));
+  const opts = GRID[dir].grid.map(t => {
+    const star = fixedSet.has(t) ? ' ⭐ 고정' : '';
+    return `<option value="${t}">${t}${star}</option>`;
+  }).join('');
+  $('gridSel').innerHTML = opts;
+}
 function payload() {
-  return { name: $('name').value||'학생', direction: state.direction, mode: state.mode,
-           train_time: $('train').value, desire_time: $('desire').value, travel_date: $('date').value };
+  // 'grid' 모드는 셔틀 시각을 직접 train_time 자리에 넣음 → 매칭 로직 통과
+  const train_time = state.mode==='grid' ? $('gridSel').value : $('train').value;
+  // grid 모드는 mode='train'으로 보내되 KTX 매칭 우회: 그리드 시각을 그대로 셔틀로 인식하게 별도 처리
+  return { name: $('name').value||'학생', direction: state.direction,
+           mode: state.mode==='grid' ? 'grid' : state.mode,
+           train_time, desire_time: $('desire').value, travel_date: $('date').value };
 }
 async function post(url, body) {
   const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
