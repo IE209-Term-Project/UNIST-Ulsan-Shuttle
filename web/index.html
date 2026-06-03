@@ -136,8 +136,14 @@
       <h2 class="text-xl font-semibold">🚍 셔틀 운행 계획</h2>
       <span id="planDate" class="text-sm text-gray-400"></span>
     </div>
-    <p class="text-gray-500 text-sm mb-3">선택한 날짜의 운행 예정 셔틀 · 예약 실시간 반영</p>
-    <ul id="plan" class="space-y-2 text-[15px]"><li class="text-gray-400">불러오는 중…</li></ul>
+    <p class="text-gray-500 text-sm mb-3">선택한 날짜의 모든 슬롯 · 예약 실시간 반영 (🟢 운행 / 🟡 모집 중 / ⚪ 신청 없음 / 🔴 미운행)</p>
+    <div class="flex gap-2 mb-3 text-sm">
+      <button data-pf="all" class="plan-filter rounded-full px-3 py-1 bg-blue-600 text-white">전체</button>
+      <button data-pf="active" class="plan-filter rounded-full px-3 py-1 bg-gray-100">운행 + 모집 중</button>
+      <button data-pf="to_station" class="plan-filter rounded-full px-3 py-1 bg-gray-100">울산역행</button>
+      <button data-pf="to_campus" class="plan-filter rounded-full px-3 py-1 bg-gray-100">캠퍼스행</button>
+    </div>
+    <ul id="plan" class="space-y-1.5 text-[15px] max-h-96 overflow-y-auto pr-1"><li class="text-gray-400">불러오는 중…</li></ul>
   </section>
 
   <!-- Carpool -->
@@ -246,19 +252,48 @@ async function loadBis() {
     $('bis').innerHTML = cell('울산과학기술원 정류장', d.unist) + cell('울산역 정류장', d.ulsan);
   } catch(e) { $('bis').innerHTML = '<div class="text-gray-400">실시간 정보를 불러올 수 없습니다.</div>'; }
 }
+let PLAN_DATA = [];
+let PLAN_FILTER = 'all';
 async function loadPlan() {
   const date = $('date').value;
   try {
     const d = await (await fetch('/api/plan?date='+date)).json();
     $('planDate').textContent = `${d.date} ${d.weekday||''}`;
-    const ul = $('plan');
-    ul.innerHTML = (d.shuttles && d.shuttles.length)
-      ? d.shuttles.map(s => `<li class="flex items-center justify-between border-b border-gray-100 pb-2">`
-          + `<span>${s.shuttle_time} · ${s.slot} <span class="text-gray-400 text-sm">(${s.dir_kr})</span></span>`
-          + `<span class="${s.run?'text-green-600':'text-gray-400'} font-medium text-sm">${s.status}</span></li>`).join('')
-      : '<li class="text-gray-400">이 날짜에 예정된 셔틀이 없습니다.</li>';
+    PLAN_DATA = d.shuttles || [];
+    renderPlan();
   } catch(e) {}
 }
+function renderPlan() {
+  const ul = $('plan');
+  let rows = PLAN_DATA;
+  if (PLAN_FILTER === 'active') rows = rows.filter(s => s.run || s.count > 0);
+  else if (PLAN_FILTER === 'to_station' || PLAN_FILTER === 'to_campus') rows = rows.filter(s => s.direction === PLAN_FILTER);
+  if (!rows.length) { ul.innerHTML = '<li class="text-gray-400">표시할 슬롯이 없습니다.</li>'; return; }
+  ul.innerHTML = rows.map(s => {
+    const star = s.is_fixed ? ' ⭐' : '';
+    const dirIcon = s.direction === 'to_station' ? '→역' : '→캠';
+    const colorClass = s.run ? 'text-green-600 font-semibold'
+                       : (s.count > 0 ? 'text-amber-600' : 'text-gray-400');
+    return `<li class="flex items-center justify-between border-b border-gray-100 py-1.5">
+      <span class="text-sm">
+        <span class="font-mono">${s.shuttle_time}</span>
+        <span class="text-gray-400 text-xs ml-1">${dirIcon}</span>
+        <span class="text-gray-500 text-xs ml-2">${s.slot}${star}</span>
+      </span>
+      <span class="${colorClass} text-xs">${s.status}</span>
+    </li>`;
+  }).join('');
+}
+document.querySelectorAll('.plan-filter').forEach(b => b.onclick = () => {
+  PLAN_FILTER = b.dataset.pf;
+  document.querySelectorAll('.plan-filter').forEach(x => {
+    const on = x.dataset.pf === PLAN_FILTER;
+    x.classList.toggle('bg-blue-600', on);
+    x.classList.toggle('text-white', on);
+    x.classList.toggle('bg-gray-100', !on);
+  });
+  renderPlan();
+});
 function fillTrains() {
   const b = $('bound').value;
   $('train').innerHTML = (TT[b]?.options||[]).map(o => `<option value="${o}">${o}</option>`).join('');

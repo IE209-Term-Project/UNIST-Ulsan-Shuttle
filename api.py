@@ -234,7 +234,7 @@ def api_bis():
     return {'unist': safe('to_station'), 'ulsan': safe('to_campus')}
 
 
-# ── 셔틀 운행 계획 (해당 요일, 예약 반영 실시간) ───────
+# ── 셔틀 운행 계획 (해당 요일, 모든 그리드 슬롯 + 예약 반영 실시간) ───────
 @app.get('/api/plan')
 def api_plan(date: str = None):
     date = (date or '').strip() or _today()
@@ -242,45 +242,65 @@ def api_plan(date: str = None):
         wd = weekday_of(date)
     except ValueError:
         return JSONResponse({'ok': False, 'info': '날짜 형식 오류'}, status_code=400)
-    from shuttle_system.core.schedule import daily_dispatch
+    from shuttle_system.core.schedule import (
+        daily_dispatch, grid_options, SHUTTLE_FIXED,
+    )
     disp = daily_dispatch(store, date, FARE)
     n_star = disp['n_star']
-    shuttles = []
-    seen = set()
 
     def _dir_kr(d):
         return '울산역행' if d == 'to_station' else '캠퍼스행'
 
-    # 확정된 운행 (고정 + 단일버스 가능 조건부)
-    for c in disp['confirmed']:
-        seen.add((c['direction'], c['ktx']))
-        shuttles.append({
-            'slot': c['slot'], 'direction': c['direction'], 'dir_kr': _dir_kr(c['direction']),
-            'shuttle_time': c['shuttle_time'], 'ktx': c['ktx'], 'service': c['service'],
-            'status': '운행 확정 (고정)' if c['service'] == 'fixed' else f"운행 확정 ({c['count']}/{n_star}명)",
-            'run': True, 'count': c['count']})
-    # 수요는 찼으나 버스 한 대 제약으로 밀린 운행
-    for c in disp['bumped']:
-        seen.add((c['direction'], c['ktx']))
-        shuttles.append({
-            'slot': c['slot'], 'direction': c['direction'], 'dir_kr': _dir_kr(c['direction']),
-            'shuttle_time': c['shuttle_time'], 'ktx': c['ktx'], 'service': 'conditional',
-            'status': f"미운행 ({c['reason']}) → 카풀/513", 'run': False, 'count': c['count']})
-    # 아직 모집 중(N* 미달) 조건부
+    # 1) 확정·밀림 인덱스
+    confirmed_map = {(c['direction'], c['shuttle_time']): c for c in disp['confirmed']}
+    bumped_map = {(c['direction'], c['shuttle_time']): c for c in disp['bumped']}
+
+    # 2) 해당 요일 고정 슬롯 인덱스 (이름 표시용)
+    fixed_map = {}
+    for direction, entries in SHUTTLE_FIXED.items():
+        for e in entries:
+            if e['wd'] == wd:
+                fixed_map[(direction, e['shuttle'])] = e['slot']
+
+    # 3) 예약 수 카운트
     counts = {}
     for r in store.all_records():
         if str(r.get('travel_date')) == date:
             k = (str(r.get('direction')), str(r.get('ktx_time')))
             counts[k] = counts.get(k, 0) + 1
-    from shuttle_system.core.schedule import shuttle_time_for
-    for (direction, ktx), count in counts.items():
-        if (direction, ktx) in seen or count >= n_star:
-            continue
-        shuttles.append({
-            'slot': f'{ktx} 조건부', 'direction': direction, 'dir_kr': _dir_kr(direction),
-            'shuttle_time': shuttle_time_for(direction, ktx), 'ktx': ktx, 'service': 'conditional',
-            'status': f'모집 중 ({count}/{n_star}명)', 'run': False, 'count': count})
-    shuttles.sort(key=lambda s: s['shuttle_time'])
+
+    # 4) 모든 그리드 슬롯을 양방향으로 나열
+    shuttles = []
+    for direction in ('to_station', 'to_campus'):
+        for t in grid_options(direction):
+            key = (direction, t)
+            count = counts.get(key, 0)
+            is_fixed = key in fixed_map
+            slot_label = fixed_map.get(key, f'{t} 그리드')
+            if key in confirmed_map:
+                if is_fixed:
+                    status, run, svc = '🟢 운행 확정 (고정)', True, 'fixed'
+                else:
+                    status, run, svc = f'🟢 운행 확정 ({count}/{n_star}명)', True, 'conditional'
+            elif key in bumped_map:
+                status, run, svc = f"🔴 미운행 ({bumped_map[key]['reason']})", False, 'conditional'
+            elif is_fixed:
+                # 고정인데 disp에 없는 경우(거의 없음): 항상 운행
+                status, run, svc = '🟢 운행 확정 (고정)', True, 'fixed'
+            elif count >= n_star:
+                # 이미 dispatch에서 처리됐어야 하지만 안전망
+                status, run, svc = f'🟢 운행 확정 ({count}/{n_star}명)', True, 'conditional'
+            elif count > 0:
+                status, run, svc = f'🟡 모집 중 ({count}/{n_star}명)', False, 'conditional'
+            else:
+                status, run, svc = f'⚪ 신청 없음 (0/{n_star}명)', False, 'conditional'
+            shuttles.append({
+                'slot': slot_label, 'direction': direction, 'dir_kr': _dir_kr(direction),
+                'shuttle_time': t, 'ktx': t, 'service': svc,
+                'status': status, 'run': run, 'count': count,
+                'is_fixed': is_fixed})
+    # 시각순(같은 시각이면 to_station 먼저)
+    shuttles.sort(key=lambda s: (s['shuttle_time'], 0 if s['direction'] == 'to_station' else 1))
     return {'ok': True, 'date': date, 'weekday': WEEKDAY_KR[wd] + '요일',
             'n_star': n_star, 'shuttles': shuttles}
 
