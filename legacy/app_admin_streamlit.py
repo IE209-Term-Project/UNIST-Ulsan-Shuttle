@@ -47,7 +47,11 @@ def load_report(fare):
 
 report = load_report(fare)
 df = pd.DataFrame(report['slots'])
-df['label'] = df['slot'] + '·' + df['direction'].str[3:]
+if df.empty:
+    st.info('아직 집계할 예약이 없습니다. 학생 앱에서 예약이 발생하면 리포트가 표시됩니다.')
+    st.stop()
+df['label'] = df['ktx'].astype(str) + ' ' + df['direction'].astype(str).map(
+    {'to_station': '울산역행', 'to_campus': '캠퍼스행'}).fillna('')
 
 # ── KPI 카드 ────────────────────────────────────────
 c1, c2, c3, c4 = st.columns(4)
