@@ -63,13 +63,6 @@ def test_pusher_exception_does_not_break():
     assert len(created) == 1   # 발송 실패해도 알림 기록은 됨
 
 
-def test_delay_simulation():
-    s = MemoryReservationStore()
-    _seed(s, 'to_station', '13:56', '2026-06-04', 3)
-    created = run_notification_check(s, fare=2000, simulate_delay=True)
-    assert any(c['type'] == 'delay' for c in created)
-
-
 def test_notification_store_roundtrip():
     s = MemoryReservationStore()
     s.add_notification({'type': 'dispatch', 'direction': 'to_station',

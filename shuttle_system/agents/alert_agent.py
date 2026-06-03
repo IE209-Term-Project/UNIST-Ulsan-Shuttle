@@ -21,7 +21,7 @@ def _wd(date):
     return datetime.strptime(str(date).strip(), '%Y-%m-%d').weekday()
 
 
-def detect_events(store, fare=POLICY_FARE, simulate_delay=False):
+def detect_events(store, fare=POLICY_FARE, simulate_delay=False):  # noqa: ARG001  (legacy arg)
     """예약 데이터에서 알림 이벤트를 추출(결정론적)."""
     n_star = breakeven_N(fare)
     groups = Counter()
@@ -40,10 +40,6 @@ def detect_events(store, fare=POLICY_FARE, simulate_delay=False):
             events.append({'type': 'dispatch', 'direction': direction, 'ktx_time': ktx,
                            'travel_date': date, 'slot': slot.get('slot', ''), 'count': count,
                            'n_star': n_star, 'shuttle_time': slot.get('shuttle_time', '')})
-    if simulate_delay and groups:
-        (direction, ktx, date), count = next(iter(groups.items()))
-        events.append({'type': 'delay', 'direction': direction, 'ktx_time': ktx,
-                       'travel_date': date, 'count': count, 'delay_min': 10})
     return events
 
 
@@ -72,9 +68,6 @@ def _template_message(e):
         return (f"🚕 [카풀 매칭 가능] {when} {d}, 같은 시각 이동 {e['count']}명이 모였습니다. "
                 f"셔틀 미운행 구간이라 택시 카풀을 추천해요 — 4명 기준 1인 약 "
                 f"{e['per_person']:,}원. 앱에서 '🚕 카풀 신청'을 누르면 그룹에 자동 편성됩니다.")
-    if e['type'] == 'delay':
-        return (f"⚠️ [지연 경고] {when} {d} 연계 513 버스가 약 {e['delay_min']}분 지연되고 있어요. "
-                f"셔틀·택시를 이용하거나 {e['delay_min']}분 일찍 정류장으로 출발하세요.")
     return str(e)
 
 

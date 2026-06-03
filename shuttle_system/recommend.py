@@ -5,11 +5,27 @@
 """
 from datetime import datetime
 
+from datetime import datetime
+
 from shuttle_system.core.optimization import breakeven_N, POLICY_FARE
 from shuttle_system.core.schedule import (
     find_shuttle_slot, find_shuttle_near, slot_phase, VEHICLE_CAPACITY, CUTOFF_HOURS,
 )
 from shuttle_system.agents.notify_agent import taxi_share_logic
+
+
+def time_context(shuttle_time, travel_date, now=None):
+    """예약 시점의 시간 맥락: 'past' | 'today' | 'future'."""
+    now = now or datetime.now()
+    try:
+        depart = datetime.strptime(f'{travel_date} {shuttle_time}', '%Y-%m-%d %H:%M')
+    except ValueError:
+        return 'future'
+    if depart < now:
+        return 'past'
+    if depart.date() == now.date():
+        return 'today'
+    return 'future'
 
 
 def weekday_of(travel_date):
@@ -61,9 +77,12 @@ def recommend(store, name, direction, ktx_time, travel_date, fare=POLICY_FARE, d
     service = slot['service']
     dir_kr = '울산역행' if direction == 'to_station' else '캠퍼스행'
 
-    # 마감 여부·정원 체크
-    phase = slot_phase(slot.get('shuttle_time') or ktx_time, travel_date) if service else 'open'
-    is_closed = (phase == 'closed')
+    # 마감 여부·정원·시간 맥락 체크
+    shuttle_t = slot.get('shuttle_time') or ktx_time
+    phase = slot_phase(shuttle_t, travel_date) if service else 'open'
+    tctx = time_context(shuttle_t, travel_date)
+    is_past = (tctx == 'past')
+    is_closed = (phase == 'closed') or is_past
     is_full = (service in ('fixed', 'conditional') and before >= VEHICLE_CAPACITY)
 
     booked = False
@@ -72,14 +91,22 @@ def recommend(store, name, direction, ktx_time, travel_date, fare=POLICY_FARE, d
         booked = True
     count = store.count(direction, ktx_time, travel_date)
 
-    # 닫힘/만석은 예약 거부 + 대체 안내
+    # 닫힘/만석/지난 시각은 예약 거부 + 시간 맥락 맞는 안내
     if service in ('fixed', 'conditional') and (is_closed or is_full):
-        reason = ('이미 마감되어' if is_closed else f'정원({VEHICLE_CAPACITY}명) 도달로')
+        if is_past:
+            return {'mode': 'alt', 'booked': False, 'reservations': count, 'required': n_star,
+                    'service': service, 'shuttle_time': slot.get('shuttle_time'),
+                    'phase': phase,
+                    'message': (f"⏰ 이미 지난 시각이에요. 다음 셔틀 시각을 선택해 예약해 주세요.")}
+        if is_full:
+            reason = f'정원({VEHICLE_CAPACITY}명) 도달로'
+        else:
+            reason = '마감 시각(출발 2시간 전)이 지나'
         share = taxi_share_logic(store, direction, ktx_time, travel_date)
         return {'mode': 'alt', 'booked': False, 'reservations': count, 'required': n_star,
                 'service': service, 'shuttle_time': slot.get('shuttle_time'),
                 'phase': phase,
-                'message': (f"❌ 예약 불가 — 이 셔틀은 {reason} 예약이 마감되었습니다. "
+                'message': (f"❌ 예약 불가 — {reason} 예약이 마감되었습니다. "
                             f"같은 시각 {share['group_size']}명과 택시 카풀(1인 약 "
                             f"{share['per_person_krw']:,}원) 또는 513 버스를 이용하세요.")}
 
@@ -106,13 +133,16 @@ def recommend(store, name, direction, ktx_time, travel_date, fare=POLICY_FARE, d
                 'shuttle_time': slot['shuttle_time'], 'message': msg}
 
     # 셔틀 슬롯 없음
-    share = taxi_share_logic(store, direction, ktx_time, travel_date)
-    if share['group_size'] >= 2:
-        msg = (f"이 시각엔 배차된 셔틀이 없어요. 같은 시각 이동 {share['group_size']}명과 "
-               f"택시 카풀 시 1인 약 {share['per_person_krw']:,}원! 아래 '카풀 신청'을 누르세요. "
-               f"또는 513 버스를 이용할 수 있어요.")
+    if time_context(ktx_time, travel_date) == 'past':
+        msg = "⏰ 이미 지난 시각이에요. 다음 KTX/SRT 시각을 선택해 주세요."
     else:
-        msg = ("이 시각엔 배차된 셔틀이 없어요. 513 버스 또는 택시 이용을 추천합니다. "
-               "같은 시각 예약자가 더 생기면 카풀도 가능해요.")
+        share = taxi_share_logic(store, direction, ktx_time, travel_date)
+        if share['group_size'] >= 2:
+            msg = (f"이 시각엔 배차된 셔틀이 없어요. 같은 시각 이동 {share['group_size']}명과 "
+                   f"택시 카풀 시 1인 약 {share['per_person_krw']:,}원! 아래 '카풀 신청'을 누르세요. "
+                   f"또는 513 버스를 이용할 수 있어요.")
+        else:
+            msg = ("이 시각엔 배차된 셔틀이 없어요. 513 버스 또는 택시 이용을 추천합니다. "
+                   "같은 시각 예약자가 더 생기면 카풀도 가능해요.")
     return {'mode': 'alt', 'booked': False, 'reservations': count, 'required': None,
             'service': None, 'shuttle_time': None, 'message': msg}

@@ -234,12 +234,6 @@ def api_notify_check():
     return {'ok': True, 'new': [n['message'] for n in new]}
 
 
-@app.post('/api/notify/delay')
-def api_notify_delay():
-    new = run_notification_check(store, fare=FARE, simulate_delay=True, pusher=kakao_send)
-    return {'ok': True, 'new': [n['message'] for n in new]}
-
-
 # ── 실시간 513 (BIS) ────────────────────────────────
 @app.get('/api/bis')
 def api_bis():
