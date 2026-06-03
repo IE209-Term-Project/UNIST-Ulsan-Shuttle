@@ -1,10 +1,10 @@
 """관리자용 운영 리포트 — Streamlit 대시보드.
 
-학생 앱(Gradio)과 같은 저장소를 공유한다. 로직(core/report_agent)은 그대로 재사용하고
-UI만 Streamlit으로 구성한다.
+학생 앱(메인: FastAPI)과 같은 Google Sheet를 공유한다. 로직(core/report_agent)은 그대로
+재사용하고 UI만 Streamlit으로 구성한다.
 
 실행:
-  로컬:  streamlit run app_admin_streamlit.py
+  로컬:  streamlit run legacy/app_admin_streamlit.py
   HF:    SDK=streamlit Space에 올리고 app_file을 이 파일로 지정
 
 필요한 Secrets: OPENAI_API_KEY, GOOGLE_SERVICE_ACCOUNT_JSON, RESERVATION_SHEET_ID
@@ -15,11 +15,18 @@ import streamlit as st
 
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from datetime import datetime, date as _date, timedelta
+
 from shuttle_system.storage import make_store
 from shuttle_system.core.optimization import breakeven_N
-from shuttle_system.agents.report_agent import compute_operations_report, narrate_report
+from shuttle_system.agents.report_agent import (
+    compute_operations_report, narrate_report, build_weekly_xlsx)
 
-st.set_page_config(page_title='UNIST 셔틀 운영 리포트', page_icon='🛠', layout='wide')
+st.set_page_config(page_title='UNIST–울산역 수요반응형 셔틀 운영 리포트',
+                   layout='wide')
+
+WD_ORDER = ['월', '화', '수', '목', '금', '토', '일']
+DIRS = [('to_station', '울산역행'), ('to_campus', '캠퍼스행')]
 
 
 @st.cache_resource
@@ -27,7 +34,7 @@ def get_store():
     return make_store()
 
 
-st.title('🛠 UNIST ↔ 울산역 셔틀 운영 리포트')
+st.title('UNIST–울산역 수요반응형 셔틀 운영 리포트')
 st.caption('학생 예약(Google Sheets)을 OR 모델 기준으로 집계한 관리자용 대시보드')
 
 # ── 사이드바 컨트롤 ─────────────────────────────────
@@ -40,6 +47,73 @@ if st.sidebar.button('🔄 새로고침'):
 store = get_store()
 
 
+# ── 사이드바: 📑 주간 보고서 ───────────────────────────
+# 매주 월요일 00시가 지나면 직전 주(Mon~Sun)가 "완료 주차"로 추가된다.
+# 사이드바 좌상단 >> 토글을 열면 보고서 탭이 보인다.
+def _completed_weeks(records):
+    today = _date.today()
+    dates = set()
+    for r in records:
+        try:
+            dates.add(datetime.strptime(str(r.get('travel_date')).strip(),
+                                        '%Y-%m-%d').date())
+        except (ValueError, AttributeError):
+            continue
+    weeks = set()
+    for d in dates:
+        mon = d - timedelta(days=d.weekday())
+        sun = mon + timedelta(days=6)
+        if sun < today:                  # 일요일이 지난 주만 "완료"로 본다
+            weeks.add((mon, sun))
+    return sorted(weeks, reverse=True)
+
+
+@st.cache_data(ttl=300)
+def _weekly_xlsx_bytes(mon_iso, sun_iso, fare):
+    return build_weekly_xlsx(store, mon_iso, sun_iso, fare=fare)
+
+
+with st.sidebar:
+    st.markdown('---')
+    with st.expander('📑 보고서 (주간 .xlsx)', expanded=True):
+        st.caption('매주 월요일 00시가 지나면 직전 주(월~일) 보고서가 자동으로 추가됩니다.')
+        try:
+            recs = store.all_records()
+        except Exception as e:
+            recs = []; st.caption(f'⚠ 시트 읽기 실패: {e}')
+        weeks = _completed_weeks(recs)
+        if not weeks:
+            st.caption('완료된 주차 없음 — 이번 주가 끝나야 첫 보고서가 생성됩니다.')
+        else:
+            st.caption(f'총 {len(weeks)}개 주차')
+            for mon, sun in weeks:
+                label = f"{mon.strftime('%Y-%m-%d')} ~ {sun.strftime('%m-%d')} (월~일)"
+                try:
+                    data = _weekly_xlsx_bytes(mon.isoformat(), sun.isoformat(), fare)
+                    st.download_button(
+                        f'⬇ {label}', data=data,
+                        file_name=f'shuttle_weekly_{mon.isoformat()}_{sun.isoformat()}.xlsx',
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        key=f'rep_{mon.isoformat()}')
+                except Exception as e:
+                    st.caption(f'⚠ {label}: {e}')
+
+        # 진행 중 주차 (월~일이 아직 안 끝남) — 미리보기
+        today_d = _date.today()
+        cur_mon = today_d - timedelta(days=today_d.weekday())
+        cur_sun = cur_mon + timedelta(days=6)
+        st.caption(f"진행 중: {cur_mon} ~ {cur_sun} (일요일 이후 자동 추가)")
+        try:
+            data = _weekly_xlsx_bytes(cur_mon.isoformat(), cur_sun.isoformat(), fare)
+            st.download_button(
+                f'⬇ 진행 중 주차 (미리보기)', data=data,
+                file_name=f'shuttle_weekly_PREVIEW_{cur_mon.isoformat()}.xlsx',
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                key='rep_preview')
+        except Exception:
+            pass
+
+
 @st.cache_data(ttl=30)
 def load_report(fare):
     return compute_operations_report(store, fare=fare)
@@ -48,10 +122,16 @@ def load_report(fare):
 report = load_report(fare)
 df = pd.DataFrame(report['slots'])
 if df.empty:
-    st.info('아직 집계할 예약이 없습니다. 학생 앱에서 예약이 발생하면 리포트가 표시됩니다.')
+    raw = len(getattr(store.ws, 'get_all_values', lambda: [])()) if hasattr(store, 'ws') else None
+    st.info('아직 집계할 예약이 없습니다.')
+    st.caption(
+        f"🛠 디버그 · 저장소={type(store).__name__} · 시트URL={getattr(store, 'url', '?')} · "
+        f"sheet1 raw행수={raw} · SHEET_ID env앞8={(os.environ.get('RESERVATION_SHEET_ID', '?')[:8])} · "
+        f"SA_JSON 길이={len(os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON', ''))}")
     st.stop()
-df['label'] = df['ktx'].astype(str) + ' ' + df['direction'].astype(str).map(
-    {'to_station': '울산역행', 'to_campus': '캠퍼스행'}).fillna('')
+
+# 슬롯 라벨 = "요일 + 시간"
+df['slot_label'] = df['weekday'] + ' ' + df['train_time']
 
 # ── KPI 카드 ────────────────────────────────────────
 c1, c2, c3, c4 = st.columns(4)
@@ -62,47 +142,86 @@ c4.metric('대기 절감', f"{report['total_wait_saved_hours']}시간")
 
 st.divider()
 
-# ── 차트 1: 예약 vs N* (기준선) ─────────────────────
-left, right = st.columns(2)
-with left:
-    st.subheader(f'슬롯별 예약 인원 vs N*={n_star}')
-    bars = alt.Chart(df).mark_bar().encode(
-        x=alt.X('label:N', sort=None, title=None),
+
+# ── 누적 막대그래프 (방향별 × 인원/순편익) — 운행 슬롯만 ──
+def stacked_chart(sub, y_field, y_title):
+    return alt.Chart(sub).mark_bar().encode(
+        x=alt.X('weekday:N', sort=WD_ORDER, title='요일',
+                axis=alt.Axis(labelAngle=0)),
+        y=alt.Y(f'{y_field}:Q', title=y_title, stack='zero'),
+        color=alt.Color('slot_label:N', title='슬롯',
+                        scale=alt.Scale(scheme='tableau20')),
+        order=alt.Order('train_time:N'),
+        tooltip=[alt.Tooltip('slot_label:N', title='슬롯'),
+                 alt.Tooltip('service:N', title='유형'),
+                 alt.Tooltip('travel_date:N', title='날짜'),
+                 alt.Tooltip('reservations:Q', title='예약 인원'),
+                 alt.Tooltip('net_benefit:Q', title='순편익(원)', format=',d')]
+    ).properties(width='container', height=320)
+
+
+dispatched_df = df[df['dispatched'] == True]
+for dir_code, dir_kr in DIRS:
+    st.subheader(f'📊 {dir_kr} (운행 확정 슬롯)')
+    sub = dispatched_df[dispatched_df['direction'] == dir_code]
+    if sub.empty:
+        st.caption(f'{dir_kr} 방향 운행 슬롯 없음'); continue
+    left, right = st.columns(2)
+    with left:
+        st.markdown('**요일별 예약 인원 (슬롯 누적)**')
+        st.altair_chart(stacked_chart(sub, 'reservations', '예약 인원'))
+    with right:
+        st.markdown('**요일별 실현 순편익 — 원 (슬롯 누적)**')
+        st.altair_chart(stacked_chart(sub, 'net_benefit', '순편익(원)'))
+
+st.divider()
+
+# ── 미운행 슬롯 차트 (예약자 ≥ 1, 운행 X) ───────────
+st.subheader('🚫 미운행 슬롯 — 예약자는 있었으나 N\\* 미달')
+missed = df[(df['dispatched'] == False) & (df['reservations'] >= 1)].copy()
+if missed.empty:
+    st.caption('해당 케이스 없음 — 모든 예약자가 있는 슬롯이 운행됐습니다.')
+else:
+    missed['dir_kr'] = missed['direction'].map(
+        {'to_station': '울산역행', 'to_campus': '캠퍼스행'})
+    missed_chart = alt.Chart(missed).mark_bar().encode(
+        x=alt.X('slot_label:N', sort='-y', title='슬롯 (요일 + 시간)',
+                axis=alt.Axis(labelAngle=0)),
         y=alt.Y('reservations:Q', title='예약 인원'),
-        color=alt.Color('dispatched:N', scale=alt.Scale(
-            domain=[True, False], range=['#2e7d32', '#bdbdbd']), title='운행'),
-        tooltip=['slot', 'direction', 'reservations', 'required', 'dispatched'])
-    rule = alt.Chart(pd.DataFrame({'y': [n_star]})).mark_rule(
+        color=alt.Color('dir_kr:N', title='방향',
+                        scale=alt.Scale(domain=['울산역행', '캠퍼스행'],
+                                        range=['#d97706', '#a855f7'])),
+        tooltip=[alt.Tooltip('slot_label:N', title='슬롯'),
+                 alt.Tooltip('dir_kr:N', title='방향'),
+                 alt.Tooltip('travel_date:N', title='날짜'),
+                 alt.Tooltip('reservations:Q', title='예약 인원'),
+                 alt.Tooltip('required:Q', title='필요 N*')]
+    ).properties(width='container', height=300)
+    threshold = alt.Chart(pd.DataFrame({'y': [n_star]})).mark_rule(
         color='red', strokeDash=[6, 4]).encode(y='y:Q')
-    st.altair_chart((bars + rule).properties(width='container'))
+    st.altair_chart(missed_chart + threshold)
+    st.caption(f'빨간 점선 = N\\*({n_star}명). 점선까지 모이면 운행 가능.')
 
-# ── 차트 2: 실현 순편익 ─────────────────────────────
-with right:
-    st.subheader('슬롯별 실현 순편익 (b·N − C)')
-    nb = alt.Chart(df).mark_bar().encode(
-        x=alt.X('label:N', sort=None, title=None),
-        y=alt.Y('net_benefit:Q', title='순편익(원)'),
-        color=alt.condition(alt.datum.net_benefit >= 0,
-                            alt.value('#1565c0'), alt.value('#c62828')),
-        tooltip=['slot', 'direction', 'net_benefit'])
-    st.altair_chart(nb.properties(width='container'))
+st.divider()
 
-# ── 상세 표 ─────────────────────────────────────────
+# ── 슬롯별 상세 표 ─ slot만 유지 (weekday, train_time 제거) ──
 st.subheader('슬롯별 상세')
 st.dataframe(
-    df[['service', 'direction', 'slot', 'ktx', 'reservations',
-        'required', 'dispatched', 'net_benefit', 'survey_demand']],
+    df[['service', 'direction', 'slot_label', 'travel_date',
+        'reservations', 'required', 'dispatched', 'net_benefit']]
+      .rename(columns={'slot_label': 'slot'}),
     width='stretch', hide_index=True)
 
 # ── LLM 운영 브리핑 ─────────────────────────────────
-st.subheader('🧠 운영 브리핑 (LLM)')
-if st.button('브리핑 생성'):
+st.subheader('🧠 운영 브리핑 (LLM, 상세)')
+st.caption('한 줄 요약 · 방향별 분석 · 요일별 패턴 · 순편익 TOP 슬롯 · 아쉬운 미운행 · 운영 권고 — 6개 섹션으로 구체 서술.')
+if st.button('상세 브리핑 생성'):
     with st.spinner('LLM이 집계 결과를 해석하는 중...'):
         try:
-            st.write(narrate_report(report))
+            st.markdown(narrate_report(report))
         except Exception as e:
             st.error(f'LLM 요약 오류: {e}')
 else:
-    st.caption('버튼을 누르면 위 집계 숫자를 바탕으로 LLM이 서술 요약을 생성합니다.')
+    st.caption('버튼을 누르면 위 집계 숫자를 바탕으로 LLM이 6개 섹션의 상세 브리핑을 생성합니다.')
 
 st.caption(f"집계 시각: {report['generated_at']}")
