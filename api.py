@@ -126,6 +126,74 @@ class CarpoolReq(ReserveReq):
     pass
 
 
+# ── 내 예약 / 취소 ──────────────────────────────────
+@app.get('/api/my')
+def api_my(name: str = None):
+    """내 예약 목록 + 슬롯별 상태(잠정·확정·마감 여부)."""
+    from shuttle_system.core.schedule import slot_phase, find_shuttle_slot
+    if not (name and name.strip()):
+        return {'reservations': []}
+    nm = name.strip()
+    out = []
+    for r in store.all_records():
+        if str(r.get('name')) != nm:
+            continue
+        direction = str(r.get('direction'))
+        ktx = str(r.get('ktx_time'))
+        date = str(r.get('travel_date'))
+        try:
+            from datetime import datetime
+            wd = datetime.strptime(date, '%Y-%m-%d').weekday()
+        except ValueError:
+            continue
+        n = store.count(direction, ktx, date)
+        slot = find_shuttle_slot(direction, ktx, wd, reservations=n, fare=FARE)
+        if slot['service'] is None:
+            continue
+        phase = slot_phase(slot.get('shuttle_time') or ktx, date)
+        if slot['service'] == 'fixed':
+            status = '확정 (고정)'
+        elif phase == 'closed':
+            status = '확정' if n >= breakeven_N(FARE) else '미운행'
+        else:
+            status = f'잠정 ({n}/{breakeven_N(FARE)}명)'
+        out.append({
+            'direction': direction, 'dir_kr': '울산역행' if direction == 'to_station' else '캠퍼스행',
+            'ktx_time': ktx, 'travel_date': date, 'shuttle_time': slot.get('shuttle_time'),
+            'service': slot['service'], 'phase': phase, 'status': status,
+            'cancellable': phase != 'closed' and slot['service'] != 'fixed'})
+    return {'reservations': out}
+
+
+class CancelReq(BaseModel):
+    name: str
+    direction: str
+    ktx_time: str
+    travel_date: str
+
+
+@app.post('/api/cancel')
+def api_cancel(req: CancelReq):
+    from shuttle_system.core.schedule import slot_phase, find_shuttle_slot
+    from datetime import datetime
+    try:
+        wd = datetime.strptime(req.travel_date, '%Y-%m-%d').weekday()
+    except ValueError:
+        return JSONResponse({'ok': False, 'info': '날짜 오류'}, status_code=400)
+    slot = find_shuttle_slot(req.direction, req.ktx_time, wd, fare=FARE)
+    if slot.get('service') == 'fixed':
+        return JSONResponse({'ok': False, 'info': '고정 셔틀은 취소 대상이 아닙니다.'},
+                            status_code=400)
+    if slot_phase(slot.get('shuttle_time') or req.ktx_time, req.travel_date) == 'closed':
+        return JSONResponse({'ok': False, 'info': '마감 후엔 취소할 수 없습니다.'},
+                            status_code=400)
+    ok = store.remove_one(req.name, req.direction, req.ktx_time, req.travel_date)
+    if not ok:
+        return JSONResponse({'ok': False, 'info': '해당 예약을 찾지 못했습니다.'},
+                            status_code=404)
+    return {'ok': True, 'message': '예약이 취소되었습니다.'}
+
+
 @app.post('/api/carpool/signup')
 def api_carpool_signup(req: CarpoolReq):
     date = (req.travel_date or '').strip() or _today()

@@ -14,7 +14,7 @@ def test_orchestrator_falls_back_and_books(monkeypatch):
                       desire_time='13:40', travel_date='2026-06-04', intent='reserve')
     assert res['ok'] is True
     assert res['reservations'] == 8          # 7 + 1 (실제 예약됨)
-    assert '운행 확정' in res['message']
+    assert '잠정' in res['message']          # 마감 후 확정 모델
     assert any('fallback' in t for t in res['trace'])
 
 

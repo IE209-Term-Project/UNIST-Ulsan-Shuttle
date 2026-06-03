@@ -6,7 +6,9 @@
 from datetime import datetime
 
 from shuttle_system.core.optimization import breakeven_N, POLICY_FARE
-from shuttle_system.core.schedule import find_shuttle_slot, find_shuttle_near
+from shuttle_system.core.schedule import (
+    find_shuttle_slot, find_shuttle_near, slot_phase, VEHICLE_CAPACITY, CUTOFF_HOURS,
+)
 from shuttle_system.agents.notify_agent import taxi_share_logic
 
 
@@ -59,30 +61,48 @@ def recommend(store, name, direction, ktx_time, travel_date, fare=POLICY_FARE, d
     service = slot['service']
     dir_kr = '울산역행' if direction == 'to_station' else '캠퍼스행'
 
+    # 마감 여부·정원 체크
+    phase = slot_phase(slot.get('shuttle_time') or ktx_time, travel_date) if service else 'open'
+    is_closed = (phase == 'closed')
+    is_full = (service in ('fixed', 'conditional') and before >= VEHICLE_CAPACITY)
+
     booked = False
-    if service in ('fixed', 'conditional') and do_book:
+    if service in ('fixed', 'conditional') and do_book and not is_closed and not is_full:
         store.add(name, direction, ktx_time, travel_date)
         booked = True
     count = store.count(direction, ktx_time, travel_date)
 
+    # 닫힘/만석은 예약 거부 + 대체 안내
+    if service in ('fixed', 'conditional') and (is_closed or is_full):
+        reason = ('이미 마감되어' if is_closed else f'정원({VEHICLE_CAPACITY}명) 도달로')
+        share = taxi_share_logic(store, direction, ktx_time, travel_date)
+        return {'mode': 'alt', 'booked': False, 'reservations': count, 'required': n_star,
+                'service': service, 'shuttle_time': slot.get('shuttle_time'),
+                'phase': phase,
+                'message': (f"❌ 예약 불가 — 이 셔틀은 {reason} 예약이 마감되었습니다. "
+                            f"같은 시각 {share['group_size']}명과 택시 카풀(1인 약 "
+                            f"{share['per_person_krw']:,}원) 또는 513 버스를 이용하세요.")}
+
     if service == 'fixed':
         return {'mode': 'shuttle', 'booked': booked, 'reservations': count, 'required': None,
-                'service': service, 'shuttle_time': slot['shuttle_time'],
+                'service': service, 'shuttle_time': slot['shuttle_time'], 'phase': phase,
                 'message': f"✅ 예약 완료! {ktx_time} {dir_kr} 고정 셔틀이 "
                            f"{slot['shuttle_time']}에 출발합니다. 시간 맞춰 정류장으로 오세요."}
 
     if service == 'conditional':
+        soon = ' (마감 임박!)' if phase == 'closing_soon' else ''
         if count >= n_star:
-            msg = (f"✅ 예약 완료! {ktx_time} {dir_kr} 조건부 셔틀이 {count}명으로 "
-                   f"운행 확정되었습니다(기준 {n_star}명). {slot['shuttle_time']} 출발 예정이에요.")
+            msg = (f"📝 잠정 예약 완료! 현재 {count}/{n_star}명 충족 — 마감(출발 {CUTOFF_HOURS}시간 전) "
+                   f"시 단일 차량 가능하면 {slot['shuttle_time']} 셔틀 **확정**됩니다.{soon} "
+                   f"확정/미운행은 마감 시 카톡으로 알려드려요.")
         else:
             share = taxi_share_logic(store, direction, ktx_time, travel_date)
-            msg = (f"📝 예약 접수! 현재 {count}/{n_star}명 — {n_star - count}명 더 모이면 "
-                   f"{slot['shuttle_time']} 셔틀 운행이 확정됩니다. 인원이 안 차면 같은 시각 "
-                   f"{share['group_size']}명과 택시 카풀(1인 약 {share['per_person_krw']:,}원·최대 4명) 또는 "
-                   f"513 버스를 이용할 수 있어요.")
+            msg = (f"📝 잠정 예약 접수! 현재 {count}/{n_star}명 — {n_star - count}명 더 모이면 "
+                   f"마감 시 {slot['shuttle_time']} 셔틀이 확정됩니다.{soon} 미달 시 같은 시각 "
+                   f"{share['group_size']}명과 택시 카풀(1인 약 {share['per_person_krw']:,}원·최대 4명) "
+                   f"또는 513 버스 안내가 카톡으로 갑니다.")
         return {'mode': 'shuttle', 'booked': booked, 'reservations': count,
-                'required': n_star, 'service': service,
+                'required': n_star, 'service': service, 'phase': phase,
                 'shuttle_time': slot['shuttle_time'], 'message': msg}
 
     # 셔틀 슬롯 없음

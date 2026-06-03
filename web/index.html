@@ -94,6 +94,18 @@
     <div id="trace" class="hidden mt-3 text-sm text-gray-500"></div>
   </section>
 
+  <!-- My reservations -->
+  <section class="bg-white rounded-3xl p-7 card mb-8">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="text-xl font-semibold">📋 내 예약</h2>
+      <button onclick="loadMy()" class="text-sm text-blue-600 font-medium hover:underline">새로고침</button>
+    </div>
+    <p class="text-gray-500 text-sm mb-3">잠정→확정 흐름: 출발 2시간 전 마감 시 운행/미운행이 결정되고 카톡으로 알림이 갑니다.</p>
+    <ul id="myRes" class="space-y-2 text-[15px]">
+      <li class="text-gray-400">이름을 입력하면 내 예약 목록이 표시됩니다.</li>
+    </ul>
+  </section>
+
   <!-- Live 513 -->
   <section class="bg-white rounded-3xl p-7 card mb-8">
     <div class="flex items-center justify-between mb-3">
@@ -173,8 +185,39 @@ async function init() {
   fillTrains();
   bsel.onchange = fillTrains;
   $('date').onchange = loadPlan;
-  refreshFeed(); loadBis(); loadPlan();
-  setInterval(() => { pollAlerts(); loadBis(); }, 15000);
+  $('name').onchange = () => { refreshFeed(); loadMy(); };
+  refreshFeed(); loadBis(); loadPlan(); loadMy();
+  setInterval(() => { pollAlerts(); loadBis(); loadMy(); }, 15000);
+}
+async function loadMy() {
+  const nm = ($('name').value||'').trim();
+  const ul = $('myRes');
+  if (!nm) { ul.innerHTML = '<li class="text-gray-400">이름을 입력하면 내 예약 목록이 표시됩니다.</li>'; return; }
+  const d = await (await fetch('/api/my?name=' + encodeURIComponent(nm))).json();
+  if (!d.reservations || !d.reservations.length) {
+    ul.innerHTML = '<li class="text-gray-400">예약 내역이 없습니다.</li>'; return;
+  }
+  ul.innerHTML = d.reservations.map(r => {
+    const color = r.status.includes('확정') ? 'text-green-600'
+               : r.status.includes('미운행') ? 'text-red-500'
+               : 'text-gray-600';
+    const btn = r.cancellable
+      ? `<button onclick="cancelRes('${r.direction}','${r.ktx_time}','${r.travel_date}')"
+                 class="text-xs text-red-500 hover:underline ml-2">취소</button>`
+      : '';
+    return `<li class="flex items-center justify-between border-b border-gray-100 pb-2">
+      <span>${r.travel_date} ${r.ktx_time} · ${r.dir_kr}
+        <span class="text-gray-400 text-sm">(셔틀 ${r.shuttle_time||'-'})</span></span>
+      <span class="${color} font-medium text-sm">${r.status}${btn}</span></li>`;
+  }).join('');
+}
+async function cancelRes(direction, ktx_time, travel_date) {
+  const name = ($('name').value||'').trim();
+  if (!name) return toast('⚠️ 이름이 필요합니다');
+  if (!confirm(`${travel_date} ${ktx_time} 예약을 취소할까요?`)) return;
+  const d = await post('/api/cancel', {name, direction, ktx_time, travel_date});
+  toast(d.ok ? '✅ ' + d.message : '⚠️ ' + (d.info||'취소 실패'));
+  loadMy(); loadPlan();
 }
 async function loadBis() {
   try {
@@ -228,7 +271,7 @@ async function reserve() {
     show('trace', '🤖 처리 과정: ' + d.trace.map((t,i)=>`${i+1}. ${t}`).join('  →  '));
   }
   (d.new_alerts||[]).forEach(m => toast('🔔 ' + m));
-  refreshFeed(); loadPlan();
+  refreshFeed(); loadPlan(); loadMy();
 }
 async function carpoolSignup() {
   const d = await post('/api/carpool/signup', payload());

@@ -118,8 +118,29 @@ def find_shuttle_near(direction, desired_time, weekday, window_min=30, fare=POLI
     return best
 
 
-TURNAROUND_MIN = 50   # 한 운행 점유(왕복 40 + 정비/대기). 다음 운행은 이만큼 떨어져야
-MAX_RUNS_PER_DAY = 6  # 기사 근로시간 상 하루 최대 운행 횟수
+TURNAROUND_MIN = 50    # 한 운행 점유(왕복 40 + 정비/대기). 다음 운행은 이만큼 떨어져야
+MAX_RUNS_PER_DAY = 6   # 기사 근로시간 상 하루 최대 운행 횟수
+CUTOFF_HOURS = 2       # 출발 N시간 전 = 마감 시각 (잠정 → 확정/미운행 결정)
+VEHICLE_CAPACITY = 25  # 셔틀 1대 정원
+
+
+def slot_phase(shuttle_time_hhmm, travel_date, now=None):
+    """슬롯의 현 시점 단계: 'open' | 'closing_soon' | 'closed'.
+
+    open: 마감 전(모집 중). closing_soon: 30분 이내 마감 임박. closed: 마감 지남.
+    """
+    from datetime import datetime, timedelta
+    now = now or datetime.now()
+    try:
+        depart = datetime.strptime(f'{travel_date} {shuttle_time_hhmm}', '%Y-%m-%d %H:%M')
+    except ValueError:
+        return 'open'
+    cutoff = depart - timedelta(hours=CUTOFF_HOURS)
+    if now >= cutoff:
+        return 'closed'
+    if now >= cutoff - timedelta(minutes=30):
+        return 'closing_soon'
+    return 'open'
 
 
 def _wd_of_date(date):

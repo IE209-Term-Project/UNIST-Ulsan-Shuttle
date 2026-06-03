@@ -80,6 +80,15 @@ class MemoryReservationStore:
         self._rows = [r for r in self._rows
                       if not _match(r, direction, ktx_time, travel_date)]
 
+    def remove_one(self, name, direction, ktx_time, travel_date):
+        """이름+슬롯이 일치하는 예약 1건만 제거. 반환: 제거 성공 여부."""
+        for i, r in enumerate(self._rows):
+            if (_match(r, direction, ktx_time, travel_date)
+                    and str(r.get('name')) == name.strip()):
+                del self._rows[i]
+                return True
+        return False
+
 
 class _SheetsStoreBase:
     """gspread 워크시트(self.ws)에 대한 공통 CRUD. 인증/시트 열기는 서브클래스가 담당."""
@@ -165,6 +174,23 @@ class _SheetsStoreBase:
         rows = [HEADER] + [[r.get('name'), r.get('direction'), r.get('ktx_time'),
                             r.get('travel_date'), r.get('created_at')] for r in kept]
         self.ws.append_rows(rows, value_input_option='RAW')  # 단일 호출
+
+    def remove_one(self, name, direction, ktx_time, travel_date):
+        records = self.all_records()
+        target_idx = None
+        for i, r in enumerate(records):
+            if (_match(r, direction, ktx_time, travel_date)
+                    and str(r.get('name')) == name.strip()):
+                target_idx = i
+                break
+        if target_idx is None:
+            return False
+        kept = records[:target_idx] + records[target_idx + 1:]
+        self.ws.clear()
+        rows = [HEADER] + [[r.get('name'), r.get('direction'), r.get('ktx_time'),
+                            r.get('travel_date'), r.get('created_at')] for r in kept]
+        self.ws.append_rows(rows, value_input_option='RAW')
+        return True
 
 
 class SheetsReservationStore(_SheetsStoreBase):

@@ -20,6 +20,7 @@ def test_conditional_below_threshold_books_and_pending():
     assert r['reservations'] == 7        # 6 + 1
     assert r['required'] == 8
     assert '7/8' in r['message']
+    assert '잠정' in r['message']         # 마감 후 확정 모델
 
 
 def test_conditional_reaching_threshold_confirms():
@@ -28,7 +29,9 @@ def test_conditional_reaching_threshold_confirms():
         s.add(f'U{i}', 'to_station', '13:56', '2026-06-04')  # 7명
     r = recommend(s, '8번째', 'to_station', '13:56', '2026-06-04')
     assert r['reservations'] == 8
-    assert '운행 확정' in r['message']
+    # 마감 전엔 잠정, 단 N* 충족 메시지 포함
+    assert '잠정' in r['message']
+    assert '8/8' in r['message']
 
 
 def test_no_slot_recommends_alt_no_booking():
