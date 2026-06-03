@@ -13,20 +13,20 @@ GRID_MIN = {'to_station': 10, 'to_campus': 30}
 MATCH_BEFORE = (25, 60)   # to_station: 셔틀 출발 ~ KTX 출발 사이 분
 MATCH_AFTER = (5, 25)     # to_campus:  KTX 도착 ~ 셔틀 출발 사이 분
 
-# 고정 8편 (설문 수요 ≥ 20명 기준 + 목 저녁 보장)
-# wd: 0=월, 1=화, ..., 6=일
+# 고정 8편 — 모든 슬롯이 그리드(:10 to_station, :30 to_campus)에 있고,
+# 설문 수요 상위 8개만 "고정"으로 운영(나머지 그리드는 조건부)
 SHUTTLE_FIXED = {
     'to_station': [
-        {'slot': '토 오전', 'wd': 5, 'shuttle': '08:30', 'demand': 26},
-        {'slot': '금 오후', 'wd': 4, 'shuttle': '13:50', 'demand': 57},
-        {'slot': '목 저녁', 'wd': 3, 'shuttle': '18:20', 'demand': 24},
-        {'slot': '금 저녁', 'wd': 4, 'shuttle': '18:20', 'demand': 51},
+        {'slot': '토 오전', 'wd': 5, 'shuttle': '08:10', 'demand': 26},
+        {'slot': '금 오후', 'wd': 4, 'shuttle': '13:10', 'demand': 57},
+        {'slot': '목 저녁', 'wd': 3, 'shuttle': '18:10', 'demand': 24},
+        {'slot': '금 저녁', 'wd': 4, 'shuttle': '18:10', 'demand': 51},
     ],
     'to_campus': [
         {'slot': '월 오전', 'wd': 0, 'shuttle': '09:30', 'demand': 31},
-        {'slot': '일 오후', 'wd': 6, 'shuttle': '15:00', 'demand': 36},
+        {'slot': '일 오후', 'wd': 6, 'shuttle': '15:30', 'demand': 36},
         {'slot': '일 저녁', 'wd': 6, 'shuttle': '18:30', 'demand': 54},
-        {'slot': '일 야간', 'wd': 6, 'shuttle': '21:00', 'demand': 61},
+        {'slot': '일 야간', 'wd': 6, 'shuttle': '21:30', 'demand': 61},
     ],
 }
 

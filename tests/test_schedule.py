@@ -7,15 +7,15 @@ from shuttle_system.core.schedule import (
 
 def test_fixed_friday_afternoon_match():
     # 금요일(wd=4) 13:50 셔틀 = 고정 (금 오후)
-    r = find_shuttle_slot('to_station', '13:50', weekday=4, reservations=0)
+    r = find_shuttle_slot('to_station', '13:10', weekday=4, reservations=0)
     assert r['available'] is True
     assert r['service'] == 'fixed'
     assert r['slot'] == '금 오후'
 
 
 def test_fixed_sunday_night_match():
-    # 일요일(wd=6) 21:00 셔틀 = 고정 (일 야간 to_campus)
-    r = find_shuttle_slot('to_campus', '21:00', weekday=6)
+    # 일요일(wd=6) 21:30 셔틀 = 고정 (일 야간 to_campus)
+    r = find_shuttle_slot('to_campus', '21:30', weekday=6)
     assert r['available'] is True
     assert r['service'] == 'fixed'
 
@@ -64,7 +64,7 @@ def test_find_shuttle_near_picks_grid():
     r = find_shuttle_near('to_station', '13:30', weekday=4, window_min=60)
     assert r['found'] is True
     # 13:10(20분), 13:50(20분 — 고정) 동률 → 둘 중 하나
-    assert r['shuttle_time'] in ('13:10', '13:50')
+    assert r['shuttle_time'] in ('13:10', '13:10')
 
 
 def test_grid_options():

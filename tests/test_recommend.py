@@ -5,10 +5,10 @@ from shuttle_system.recommend import recommend, slot_status, resolve_ktx
 def test_fixed_slot_books_and_recommends_shuttle():
     s = MemoryReservationStore()
     # 금 13:58 고정 슬롯
-    r = recommend(s, '홍길동', 'to_station', '13:50', '2026-06-05')
+    r = recommend(s, '홍길동', 'to_station', '13:10', '2026-06-05')
     assert r['mode'] == 'shuttle' and r['booked'] is True
-    assert r['shuttle_time'] == '13:50'
-    assert s.count('to_station', '13:50', '2026-06-05') == 1
+    assert r['shuttle_time'] == '13:10'
+    assert s.count('to_station', '13:10', '2026-06-05') == 1
 
 
 def test_conditional_below_threshold_books_and_pending():

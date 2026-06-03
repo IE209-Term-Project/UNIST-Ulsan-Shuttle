@@ -8,7 +8,7 @@ def _today_at(hhmm, days_ahead=0):
 
 
 def test_slot_phase_open_far_future():
-    date, hh = _today_at('13:50', days_ahead=2)
+    date, hh = _today_at('13:10', days_ahead=2)
     assert slot_phase(hh, date) == 'open'
 
 
@@ -29,12 +29,12 @@ def test_remove_one_only_my_record():
     s = MemoryReservationStore()
     s.add('A', 'to_station', '14:10', '2026-06-04')
     s.add('B', 'to_station', '14:10', '2026-06-04')
-    s.add('A', 'to_station', '18:20', '2026-06-04')
+    s.add('A', 'to_station', '18:10', '2026-06-04')
     assert s.remove_one('A', 'to_station', '14:10', '2026-06-04') is True
     assert s.count('to_station', '14:10', '2026-06-04') == 1
     assert s.names('to_station', '14:10', '2026-06-04') == ['B']
     # A의 다른 슬롯 예약은 유지
-    assert s.count('to_station', '18:20', '2026-06-04') == 1
+    assert s.count('to_station', '18:10', '2026-06-04') == 1
 
 
 def test_remove_one_not_found():
