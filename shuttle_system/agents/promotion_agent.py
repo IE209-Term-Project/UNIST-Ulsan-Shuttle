@@ -14,7 +14,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 from shuttle_system.core.optimization import POLICY_FARE, breakeven_N
-from shuttle_system.core.schedule import GRID_MIN, SHUTTLE_FIXED
+from shuttle_system.core.schedule import GRID_MIN, SHUTTLE_FIXED, WEEKDAY_KR
+from shuttle_system.core import schedule_overrides as ov
 
 WINDOW_WEEKS = 4
 DEMOTE_AVG_MAX = 4          # 평균 < 4 → 강등 조건 1
@@ -146,3 +147,129 @@ def evaluate_promotions(store, today=None, fare=POLICY_FARE,
     base['demotions'].sort(key=_sk)
     base['unchanged'].sort(key=_sk)
     return base
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 변경 적용 / 롤백
+# ──────────────────────────────────────────────────────────────────────
+
+def _make_slot_label(weekday, time, suffix='자동승격'):
+    return f'{WEEKDAY_KR[weekday]} {time} ({suffix})'
+
+
+def apply_promotions(store, eval_result, effective_from, today=None,
+                     base_table=None):
+    """평가 결과(promotions+demotions)를 baseline에 적용해 새 effective_from으로 적재.
+
+    Args:
+      store: ReservationStore.
+      eval_result: evaluate_promotions()의 반환 dict (promotions/demotions 키).
+      effective_from: 새 baseline의 효력 발생일 'YYYY-MM-DD' (= 다음 월요일).
+      today: 현재 활성 baseline을 결정할 기준일. None이면 effective_from 직전.
+      base_table: 시작 baseline. None이면 store의 활성 overrides → 없으면
+                  schedule.SHUTTLE_FIXED.
+
+    Returns:
+      {'effective_from', 'applied_promotions', 'applied_demotions',
+       'new_baseline'}
+    """
+    promos = eval_result.get('promotions', [])
+    demotes = eval_result.get('demotions', [])
+
+    # 현재 활성 baseline 결정
+    if base_table is None:
+        base_table = ov.load_active_overrides(store, today=today)
+        if base_table is None:
+            base_table = {
+                'to_station': [dict(e) for e in SHUTTLE_FIXED['to_station']],
+                'to_campus': [dict(e) for e in SHUTTLE_FIXED['to_campus']],
+            }
+
+    # 강등 = (direction, wd, time) 제거
+    demote_keys = {(d['direction'], d['weekday'], d['time']) for d in demotes}
+    for direction, entries in base_table.items():
+        base_table[direction] = [e for e in entries
+                                 if (direction, e['wd'], e['shuttle'])
+                                 not in demote_keys]
+
+    # 승격 = baseline에 추가 (중복 방지)
+    for p in promos:
+        direction = p['direction']
+        wd = p['weekday']
+        time = p['time']
+        existing = {(e['wd'], e['shuttle']) for e in base_table.get(direction, [])}
+        if (wd, time) in existing:
+            continue
+        base_table.setdefault(direction, []).append({
+            'slot': _make_slot_label(wd, time, '자동승격'),
+            'wd': wd,
+            'shuttle': time,
+            'demand': int(round(p.get('avg_resv', 0))),
+        })
+
+    # 새 effective_from으로 저장
+    ov.save_new_baseline(store, base_table, effective_from=effective_from)
+
+    return {
+        'effective_from': effective_from,
+        'applied_promotions': list(promos),
+        'applied_demotions': list(demotes),
+        'new_baseline': base_table,
+    }
+
+
+def rollback_to_previous(store, effective_from, today=None):
+    """직전 baseline을 새 effective_from으로 다시 적재 → 활성 복원.
+
+    schedule_overrides에서 현재 활성(가장 최근 effective_from ≤ today)을 찾고,
+    그보다 앞선 effective_from의 가장 최근 묶음을 가져와 새 effective_from으로 저장.
+
+    Returns:
+      {'rolled_back': bool, 'reason'?: str, 'restored_from'?: str,
+       'new_baseline'?: dict}
+    """
+    rows = []
+    try:
+        rows = store.get_schedule_overrides() or []
+    except AttributeError:
+        return {'rolled_back': False,
+                'reason': 'store에 schedule_overrides 인터페이스 없음.'}
+    if not rows:
+        return {'rolled_back': False, 'reason': '저장된 baseline이 없음.'}
+
+    today = today or effective_from
+    past = [r for r in rows if str(r.get('effective_from', '')) <= today]
+    if not past:
+        return {'rolled_back': False, 'reason': '활성 baseline이 없음.'}
+
+    eff_set = sorted({str(r.get('effective_from')) for r in past}, reverse=True)
+    if len(eff_set) < 2:
+        return {'rolled_back': False,
+                'reason': '직전 baseline이 없음(첫 baseline은 롤백 불가).'}
+
+    prev_eff = eff_set[1]   # 두 번째로 최신 = 직전 활성
+    prev_rows = [r for r in past if str(r.get('effective_from')) == prev_eff]
+
+    table = {'to_station': [], 'to_campus': []}
+    for r in prev_rows:
+        direction = str(r.get('direction', ''))
+        if direction not in table:
+            continue
+        try:
+            wd = int(r.get('weekday'))
+            demand = int(r.get('demand', 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        table[direction].append({
+            'slot': str(r.get('slot_label', '')),
+            'wd': wd,
+            'shuttle': str(r.get('shuttle_time', '')),
+            'demand': demand,
+        })
+
+    ov.save_new_baseline(store, table, effective_from=effective_from)
+    return {
+        'rolled_back': True,
+        'restored_from': prev_eff,
+        'new_baseline': table,
+    }

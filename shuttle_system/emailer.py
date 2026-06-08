@@ -77,6 +77,65 @@ def send(to_email, subject, body):
     return _send_via_smtp(to_email, subject, body)
 
 
+def notify_admin_promotion(admin_email, eval_result, apply_result=None):
+    """Promotion Agent 평가/적용 결과를 관리자 이메일로 발송.
+
+    eval_result: evaluate_promotions() 반환 dict.
+    apply_result: apply_promotions() 반환 dict (적용까지 한 경우만).
+    """
+    if not admin_email:
+        return {'sent': False, 'reason': 'no_admin_email'}
+
+    WD = '월화수목금토일'
+    DIR = {'to_station': '울산역행', 'to_campus': '캠퍼스행'}
+    promos = eval_result.get('promotions', [])
+    demotes = eval_result.get('demotions', [])
+    frozen = eval_result.get('frozen', False)
+
+    lines = ['UNIST↔울산역 셔틀 · 슬롯 등급 평가 결과', '']
+    lines.append(f"평가 시각: {eval_result.get('evaluated_at', '')}")
+    lines.append(
+        f"평가 윈도우: {eval_result.get('window_start', '')} "
+        f"~ {eval_result.get('window_end', '')}")
+    if frozen:
+        lines.append('')
+        lines.append(
+            f"⚠ 동결: {eval_result.get('frozen_reason', '콜드 스타트')}")
+        return send(admin_email,
+                    '[UNIST 셔틀] 슬롯 등급 평가 (동결)',
+                    '\n'.join(lines))
+
+    lines.append('')
+    lines.append(f"승격 권고: {len(promos)}건")
+    for p in promos:
+        lines.append(
+            f"  ⬆ {DIR.get(p['direction'], p['direction'])} · "
+            f"{WD[p['weekday']]}요일 {p['time']}  "
+            f"(평균 {p['avg_resv']}명, 운행률 {int(p['dispatch_rate']*100)}%)")
+    lines.append('')
+    lines.append(f"강등 권고: {len(demotes)}건")
+    for d in demotes:
+        lines.append(
+            f"  ⬇ {DIR.get(d['direction'], d['direction'])} · "
+            f"{WD[d['weekday']]}요일 {d['time']}  "
+            f"(평균 {d['avg_resv']}명, 운행률 {int(d['dispatch_rate']*100)}%)")
+
+    if apply_result:
+        lines.append('')
+        lines.append(
+            f"✅ 적용 완료 — 효력 발생: {apply_result.get('effective_from', '')}")
+        lines.append(
+            '되돌리려면 관리자 대시보드의 [↩ 직전 시간표로 롤백] 버튼을 사용하세요.')
+    else:
+        lines.append('')
+        lines.append('관리자 대시보드에서 [✅ 적용] 또는 [무시] 결정을 내려주세요.')
+
+    n_change = len(promos) + len(demotes)
+    subj = (f'[UNIST 셔틀] 슬롯 등급 평가 — 변경 {n_change}건'
+            if n_change else '[UNIST 셔틀] 슬롯 등급 평가 — 변경 없음')
+    return send(admin_email, subj, '\n'.join(lines))
+
+
 def send_confirmation(email, name, direction, shuttle_time, travel_date, service,
                       tentative=False, reservations=None, required=None):
     """예약 즉시 본인에게 보내는 메일.

@@ -48,6 +48,74 @@ if st.sidebar.button('🔄 새로고침'):
 store = get_store()
 
 
+# ── 사이드바: 📋 슬롯 등급 관리 (Promotion Agent) ──────
+with st.sidebar.expander('📋 슬롯 등급 관리', expanded=False):
+    st.caption(
+        '단기 Promotion Agent — 직전 4주 데이터로 슬롯 승격/강등 권고. '
+        '적용 시 **다음 월요일 00시부터** 학생 앱에 반영됩니다.')
+
+    if st.button('🔍 평가 실행', key='pa_eval', use_container_width=True):
+        from shuttle_system.agents.promotion_agent import evaluate_promotions
+        st.session_state['pa_result'] = evaluate_promotions(store, fare=fare)
+
+    res = st.session_state.get('pa_result')
+    if res:
+        if res.get('frozen'):
+            st.warning(f"동결: {res.get('frozen_reason', '콜드 스타트')}")
+        else:
+            st.caption(f"윈도우: {res['window_start']} ~ {res['window_end']}")
+            promos = res.get('promotions', [])
+            demotes = res.get('demotions', [])
+
+            if promos:
+                st.markdown(f'**⬆ 승격 권고 {len(promos)}건**')
+                for p in promos:
+                    st.markdown(
+                        f"- `{p['direction']}` {WD_ORDER[p['weekday']]} "
+                        f"{p['time']}  · 평균 **{p['avg_resv']}명** · "
+                        f"운행률 **{int(p['dispatch_rate']*100)}%**")
+            if demotes:
+                st.markdown(f'**⬇ 강등 권고 {len(demotes)}건**')
+                for d in demotes:
+                    st.markdown(
+                        f"- `{d['direction']}` {WD_ORDER[d['weekday']]} "
+                        f"{d['time']}  · 평균 **{d['avg_resv']}명** · "
+                        f"운행률 **{int(d['dispatch_rate']*100)}%**")
+            if not (promos or demotes):
+                st.success('변경 권고 없음 — 현 시간표 유지.')
+
+            if (promos or demotes) and st.button(
+                    '✅ 다음 월요일부터 적용', key='pa_apply',
+                    use_container_width=True):
+                from shuttle_system.agents.promotion_agent import apply_promotions
+                from shuttle_system.core.booking_window import next_monday_midnight
+                from shuttle_system.emailer import notify_admin_promotion
+                eff = next_monday_midnight()
+                out = apply_promotions(store, res, effective_from=eff)
+                admin_email = os.environ.get('ADMIN_EMAIL', '')
+                mail = notify_admin_promotion(
+                    admin_email, res, apply_result=out)
+                mail_note = ('발송' if mail.get('sent')
+                             else '미발송 — ADMIN_EMAIL 환경변수 설정 필요')
+                st.success(
+                    f"적용됨 — 효력 발생: **{eff}**  (이메일: {mail_note})")
+                st.session_state['pa_result'] = None
+
+    st.markdown('---')
+    st.caption('↩ 롤백 — 직전 baseline으로 즉시 복귀')
+    confirm = st.checkbox('정말 롤백', key='pa_rb_confirm')
+    if confirm and st.button('실행', key='pa_rb_run',
+                             use_container_width=True):
+        from shuttle_system.agents.promotion_agent import rollback_to_previous
+        from shuttle_system.core.booking_window import next_monday_midnight
+        r = rollback_to_previous(store, effective_from=next_monday_midnight())
+        if r['rolled_back']:
+            st.success(f"복귀됨 — 직전({r['restored_from']}) → 활성")
+        else:
+            st.error(r.get('reason', '롤백 실패'))
+        st.session_state['pa_rb_confirm'] = False
+
+
 # ── 사이드바: 📑 주간 보고서 ───────────────────────────
 # 매주 월요일 00시가 지나면 직전 주(Mon~Sun)가 "완료 주차"로 추가된다.
 # 사이드바 좌상단 >> 토글을 열면 보고서 탭이 보인다.
