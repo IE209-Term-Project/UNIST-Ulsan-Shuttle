@@ -68,13 +68,25 @@ def _send_via_smtp(to_email, subject, body):
 
 
 def send(to_email, subject, body):
-    """단건 발송. Resend 우선, 없으면 Gmail SMTP 폴백."""
+    """단건 발송. Resend 우선, 실패하거나 키가 없으면 Gmail SMTP 폴백.
+
+    이전 버전은 Resend가 어떤 실패를 반환해도 SMTP로 안 넘어갔다(키만 있으면).
+    그래서 Resend 샌드박스(가입자 메일만 수신 가능) 환경에서 다른 수신자는 모두
+    실패하고 SMTP 폴백도 안 됐다. 이제는 Resend 실패 = SMTP 시도.
+    """
     if not (to_email and '@' in to_email):
         return {'sent': False, 'reason': 'bad_recipient'}
     res = _send_via_resend(to_email, subject, body)
-    if res is not None:
+    if res is not None and res.get('sent'):
         return res
-    return _send_via_smtp(to_email, subject, body)
+    smtp_res = _send_via_smtp(to_email, subject, body)
+    if smtp_res.get('sent'):
+        return smtp_res
+    # 둘 다 실패 — 진단을 위해 Resend 실패 원인도 함께 반환
+    if res is not None:
+        return {'sent': False, 'reason': 'both_failed',
+                'resend': res, 'smtp': smtp_res}
+    return smtp_res
 
 
 def notify_admin_promotion(admin_email, eval_result, apply_result=None):
