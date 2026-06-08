@@ -71,6 +71,19 @@ class MemoryReservationStore:
         for r in rows:
             self._archive.append(dict(r))
 
+    def clear_semester_archive(self, semester_ids=None):
+        """semester_ids 리스트가 주어지면 해당 학기 행만 삭제. None이면 전체 삭제."""
+        if semester_ids is None:
+            removed = len(self._archive)
+            self._archive = []
+            return removed
+        target = set(str(s) for s in semester_ids)
+        kept = [r for r in self._archive
+                if str(r.get('semester_id', '')) not in target]
+        removed = len(self._archive) - len(kept)
+        self._archive = kept
+        return removed
+
     def add_notification(self, rec):
         r = {'created_at': datetime.now().isoformat(timespec='seconds'), **rec}
         self._notifs.append(r)
@@ -221,6 +234,25 @@ class _SheetsStoreBase:
                    for r in rows]
         if payload:
             self.archive_ws.append_rows(payload, value_input_option='RAW')
+
+    def clear_semester_archive(self, semester_ids=None):
+        """전체 또는 특정 학기만 삭제 후 재적재. 시트는 header만 남기고 다시 씀."""
+        records = self.get_semester_archive()
+        if semester_ids is None:
+            kept = []
+        else:
+            target = set(str(s) for s in semester_ids)
+            kept = [r for r in records
+                    if str(r.get('semester_id', '')) not in target]
+        removed = len(records) - len(kept)
+        self.archive_ws.clear()
+        self.archive_ws.append_row(SEMESTER_ARCHIVE_HEADER,
+                                    value_input_option='RAW')
+        if kept:
+            payload = [[str(r.get(k, '')) for k in SEMESTER_ARCHIVE_HEADER]
+                       for r in kept]
+            self.archive_ws.append_rows(payload, value_input_option='RAW')
+        return removed
 
     def add(self, name, direction, train_time, travel_date, email=''):
         self.ws.append_row([(name or '익명').strip(), (email or '').strip(),
