@@ -276,6 +276,57 @@ def api_notify_check():
     return {'ok': True, 'new': [n['message'] for n in new]}
 
 
+# ── Promotion Agent — 평가 + 자동 적용 (cron · 관리자 1버튼 공용) ──
+@app.post('/api/promotion/run')
+def api_promotion_run():
+    """매주 월요일 00시(KST) GitHub Actions cron이 호출하는 자동 엔드포인트.
+
+    수행:
+      1) 직전 4주 데이터로 evaluate_promotions
+      2) 동결 아니고 권고가 있으면 즉시 apply (다음 월요일자)
+      3) 관리자 이메일 발송 (ADMIN_EMAIL env)
+
+    관리자 대시보드의 '⚡ 평가+자동 적용' 버튼도 같은 엔드포인트를 호출한다.
+    수동 사후 검토는 활동 로그 + 1클릭 롤백으로 처리.
+    """
+    from shuttle_system.agents.promotion_agent import (
+        evaluate_promotions, apply_promotions,
+    )
+    from shuttle_system.emailer import notify_admin_promotion
+    import os
+
+    eff = next_monday_midnight()
+    eval_res = evaluate_promotions(store, fare=FARE)
+    apply_res = None
+
+    if not eval_res.get('frozen'):
+        promos = eval_res.get('promotions', [])
+        demotes = eval_res.get('demotions', [])
+        if promos or demotes:
+            apply_res = apply_promotions(store, eval_res, effective_from=eff)
+
+    admin_email = os.environ.get('ADMIN_EMAIL', '')
+    mail = notify_admin_promotion(admin_email, eval_res, apply_result=apply_res)
+
+    return {
+        'ok': True,
+        'evaluated_at': eval_res.get('evaluated_at'),
+        'frozen': eval_res.get('frozen', False),
+        'promotions': len(eval_res.get('promotions', [])),
+        'demotions': len(eval_res.get('demotions', [])),
+        'applied': apply_res is not None,
+        'effective_from': apply_res.get('effective_from') if apply_res else None,
+        'mail_sent': bool(mail.get('sent')),
+    }
+
+
+@app.post('/api/promotion/rollback')
+def api_promotion_rollback():
+    """관리자 대시보드의 ↩ 롤백 버튼이 호출 (직전 baseline으로 복귀)."""
+    from shuttle_system.agents.promotion_agent import rollback_to_previous
+    return rollback_to_previous(store, effective_from=next_monday_midnight())
+
+
 def _mask_name(nm):
     """한글 이름 익명화: 2자→홍*, 3자→홍*동, 4자+→홍**동 형식."""
     s = (nm or '').strip()

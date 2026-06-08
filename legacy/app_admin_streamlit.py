@@ -51,12 +51,41 @@ store = get_store()
 # ── 사이드바: 📋 슬롯 등급 관리 (Promotion Agent) ──────
 with st.sidebar.expander('📋 슬롯 등급 관리', expanded=False):
     st.caption(
-        '단기 Promotion Agent — 직전 4주 데이터로 슬롯 승격/강등 권고. '
-        '적용 시 **다음 월요일 00시부터** 학생 앱에 반영됩니다.')
+        '단기 Promotion Agent — 매주 월요일 00시(KST) **자동 평가+적용**. '
+        '아래는 같은 동작을 즉시 수동 실행하는 인터페이스입니다. '
+        '평가 결과는 이메일로 발송되며, 문제 시 1클릭 롤백 가능.')
 
-    if st.button('🔍 평가 실행', key='pa_eval', use_container_width=True):
+    # 메인: 평가+자동 적용 (cron과 동일 동작) ─────────
+    if st.button('⚡ 평가 + 자동 적용', key='pa_run',
+                 use_container_width=True, type='primary'):
+        from shuttle_system.agents.promotion_agent import (
+            evaluate_promotions, apply_promotions,
+        )
+        from shuttle_system.core.booking_window import next_monday_midnight
+        from shuttle_system.emailer import notify_admin_promotion
+
+        eff = next_monday_midnight()
+        eval_res = evaluate_promotions(store, fare=fare)
+        apply_res = None
+        if not eval_res.get('frozen'):
+            promos = eval_res.get('promotions', [])
+            demotes = eval_res.get('demotions', [])
+            if promos or demotes:
+                apply_res = apply_promotions(store, eval_res, effective_from=eff)
+
+        admin_email = os.environ.get('ADMIN_EMAIL', '')
+        mail = notify_admin_promotion(admin_email, eval_res, apply_result=apply_res)
+        st.session_state['pa_result'] = eval_res
+        st.session_state['pa_applied'] = apply_res is not None
+        st.session_state['pa_eff'] = eff
+        st.session_state['pa_mail'] = bool(mail.get('sent'))
+
+    # 미리보기 전용: 평가만 (적용 안 함) ───────────────
+    if st.button('🔍 평가만 (미리보기)', key='pa_preview',
+                 use_container_width=True):
         from shuttle_system.agents.promotion_agent import evaluate_promotions
         st.session_state['pa_result'] = evaluate_promotions(store, fare=fare)
+        st.session_state['pa_applied'] = False
 
     res = st.session_state.get('pa_result')
     if res:
@@ -66,40 +95,29 @@ with st.sidebar.expander('📋 슬롯 등급 관리', expanded=False):
             st.caption(f"윈도우: {res['window_start']} ~ {res['window_end']}")
             promos = res.get('promotions', [])
             demotes = res.get('demotions', [])
-
             if promos:
-                st.markdown(f'**⬆ 승격 권고 {len(promos)}건**')
+                st.markdown(f'**⬆ 승격 {len(promos)}건**')
                 for p in promos:
                     st.markdown(
                         f"- `{p['direction']}` {WD_ORDER[p['weekday']]} "
                         f"{p['time']}  · 평균 **{p['avg_resv']}명** · "
                         f"운행률 **{int(p['dispatch_rate']*100)}%**")
             if demotes:
-                st.markdown(f'**⬇ 강등 권고 {len(demotes)}건**')
+                st.markdown(f'**⬇ 강등 {len(demotes)}건**')
                 for d in demotes:
                     st.markdown(
                         f"- `{d['direction']}` {WD_ORDER[d['weekday']]} "
                         f"{d['time']}  · 평균 **{d['avg_resv']}명** · "
                         f"운행률 **{int(d['dispatch_rate']*100)}%**")
             if not (promos or demotes):
-                st.success('변경 권고 없음 — 현 시간표 유지.')
+                st.success('변경 권고 없음.')
 
-            if (promos or demotes) and st.button(
-                    '✅ 다음 월요일부터 적용', key='pa_apply',
-                    use_container_width=True):
-                from shuttle_system.agents.promotion_agent import apply_promotions
-                from shuttle_system.core.booking_window import next_monday_midnight
-                from shuttle_system.emailer import notify_admin_promotion
-                eff = next_monday_midnight()
-                out = apply_promotions(store, res, effective_from=eff)
-                admin_email = os.environ.get('ADMIN_EMAIL', '')
-                mail = notify_admin_promotion(
-                    admin_email, res, apply_result=out)
-                mail_note = ('발송' if mail.get('sent')
-                             else '미발송 — ADMIN_EMAIL 환경변수 설정 필요')
-                st.success(
-                    f"적용됨 — 효력 발생: **{eff}**  (이메일: {mail_note})")
-                st.session_state['pa_result'] = None
+        if st.session_state.get('pa_applied'):
+            mail_note = ('이메일 발송 ✓' if st.session_state.get('pa_mail')
+                         else '이메일 미발송 (ADMIN_EMAIL env 미설정)')
+            st.success(
+                f"적용 완료 — 효력 발생 **{st.session_state.get('pa_eff', '')}** · "
+                f"{mail_note}")
 
     st.markdown('---')
     st.caption('↩ 롤백 — 직전 baseline으로 즉시 복귀')
