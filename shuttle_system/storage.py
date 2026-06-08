@@ -1,4 +1,4 @@
-"""예약 저장소. 슬롯 = (direction, ktx_time, travel_date).
+"""예약 저장소. 슬롯 = (direction, train_time, travel_date).
 
 - MemoryReservationStore     : 테스트/로컬용. 외부 의존 없음.
 - SheetsReservationStore     : Colab용. google.colab.auth(팝업)로 인증.
@@ -15,11 +15,19 @@ from datetime import datetime
 # 환경변수를 못 읽어 메모리 저장소로 잘못 떨어진다.
 from shuttle_system import config  # noqa: F401
 
-HEADER = ['name', 'direction', 'ktx_time', 'travel_date', 'created_at']
-NOTIF_HEADER = ['created_at', 'type', 'direction', 'ktx_time', 'travel_date', 'message']
+# NOTE: 'train_time' 컬럼은 역사적 명명(초기 KTX-기반 입력 모드에서 유래)이지만
+# 실제로는 셔틀 출발 시각(shuttle departure time)이 저장된다. UI 표기는 모두 '셔틀 시각'.
+# 추후 안정 단계에서 shuttle_time으로 마이그레이션 예정 (코드+시트 컬럼).
+HEADER = ['name', 'email', 'direction', 'train_time', 'travel_date', 'created_at']
+NOTIF_HEADER = ['created_at', 'type', 'direction', 'train_time', 'travel_date', 'message']
 NOTIF_SHEET = 'notifications'
-CARPOOL_HEADER = ['created_at', 'name', 'direction', 'ktx_time', 'travel_date']
+CARPOOL_HEADER = ['created_at', 'name', 'direction', 'train_time', 'travel_date']
 CARPOOL_SHEET = 'carpool'
+
+# Promotion Agent용 — SHUTTLE_FIXED를 시트에서 동적으로 읽기 위한 워크시트.
+SCHEDULE_OVERRIDES_SHEET = 'schedule_overrides'
+SCHEDULE_OVERRIDES_HEADER = ['effective_from', 'direction', 'weekday',
+                             'shuttle_time', 'slot_label', 'demand']
 
 # Google Sheets API 권한 범위 (시트 읽기/쓰기 + 이름으로 열기)
 GSPREAD_SCOPES = [
@@ -29,9 +37,9 @@ GSPREAD_SCOPES = [
 DEFAULT_SHEET_NAME = 'UNIST_shuttle_reservations'
 
 
-def _match(r, direction, ktx_time, travel_date):
+def _match(r, direction, train_time, travel_date):
     return (str(r.get('direction', '')) == direction
-            and str(r.get('ktx_time', '')) == ktx_time
+            and str(r.get('train_time', '')) == train_time
             and str(r.get('travel_date', '')) == travel_date)
 
 
@@ -40,6 +48,14 @@ class MemoryReservationStore:
         self._rows = []
         self._notifs = []
         self._carpool = []
+        self._overrides = []   # schedule_overrides (Promotion Agent 결정 이력)
+
+    def get_schedule_overrides(self):
+        return list(self._overrides)
+
+    def add_schedule_overrides_rows(self, rows):
+        for r in rows:
+            self._overrides.append(dict(r))
 
     def add_notification(self, rec):
         r = {'created_at': datetime.now().isoformat(timespec='seconds'), **rec}
@@ -49,36 +65,49 @@ class MemoryReservationStore:
     def all_notifications(self):
         return list(self._notifs)
 
-    def add_carpool_request(self, name, direction, ktx_time, travel_date):
+    def add_carpool_request(self, name, direction, train_time, travel_date):
         self._carpool.append({'created_at': datetime.now().isoformat(timespec='seconds'),
                               'name': (name or '익명').strip(), 'direction': direction,
-                              'ktx_time': ktx_time, 'travel_date': travel_date})
+                              'train_time': train_time, 'travel_date': travel_date})
 
     def all_carpool_requests(self):
         return list(self._carpool)
 
-    def add(self, name, direction, ktx_time, travel_date):
-        self._rows.append({'name': (name or '익명').strip(), 'direction': direction,
-                           'ktx_time': ktx_time, 'travel_date': travel_date,
+    def add(self, name, direction, train_time, travel_date, email=''):
+        self._rows.append({'name': (name or '익명').strip(), 'email': (email or '').strip(),
+                           'direction': direction, 'train_time': train_time,
+                           'travel_date': travel_date,
                            'created_at': datetime.now().isoformat(timespec='seconds')})
 
     def add_many(self, rows):
-        """rows: (name, direction, ktx_time, travel_date) 튜플 리스트."""
-        for name, direction, ktx_time, travel_date in rows:
-            self.add(name, direction, ktx_time, travel_date)
+        """rows: (name, direction, train_time, travel_date) 또는 (name, email, direction, train_time, travel_date)."""
+        for row in rows:
+            if len(row) == 5:
+                self.add(row[0], row[2], row[3], row[4], email=row[1])
+            else:
+                self.add(*row)
 
     def all_records(self):
         return list(self._rows)
 
-    def count(self, direction, ktx_time, travel_date):
-        return sum(1 for r in self._rows if _match(r, direction, ktx_time, travel_date))
+    def count(self, direction, train_time, travel_date):
+        return sum(1 for r in self._rows if _match(r, direction, train_time, travel_date))
 
-    def names(self, direction, ktx_time, travel_date):
-        return [r['name'] for r in self._rows if _match(r, direction, ktx_time, travel_date)]
+    def names(self, direction, train_time, travel_date):
+        return [r['name'] for r in self._rows if _match(r, direction, train_time, travel_date)]
 
-    def clear_slot(self, direction, ktx_time, travel_date):
+    def clear_slot(self, direction, train_time, travel_date):
         self._rows = [r for r in self._rows
-                      if not _match(r, direction, ktx_time, travel_date)]
+                      if not _match(r, direction, train_time, travel_date)]
+
+    def remove_one(self, name, direction, train_time, travel_date):
+        """이름+슬롯이 일치하는 예약 1건만 제거. 반환: 제거 성공 여부."""
+        for i, r in enumerate(self._rows):
+            if (_match(r, direction, train_time, travel_date)
+                    and str(r.get('name')) == name.strip()):
+                del self._rows[i]
+                return True
+        return False
 
 
 class _SheetsStoreBase:
@@ -123,48 +152,96 @@ class _SheetsStoreBase:
             self.carpool_ws.clear()
             self.carpool_ws.append_row(CARPOOL_HEADER, value_input_option='RAW')
 
-    def add_carpool_request(self, name, direction, ktx_time, travel_date):
+    def add_carpool_request(self, name, direction, train_time, travel_date):
         self.carpool_ws.append_row(
             [datetime.now().isoformat(timespec='seconds'), (name or '익명').strip(),
-             direction, ktx_time, travel_date], value_input_option='RAW')
+             direction, train_time, travel_date], value_input_option='RAW')
 
     def all_carpool_requests(self):
         return self.carpool_ws.get_all_records()
 
-    def add(self, name, direction, ktx_time, travel_date):
-        self.ws.append_row([(name or '익명').strip(), direction, ktx_time, travel_date,
+    def _ensure_overrides_ws(self, sh):
+        """schedule_overrides 워크시트 확보(없으면 생성)."""
+        import gspread
+        try:
+            self.overrides_ws = sh.worksheet(SCHEDULE_OVERRIDES_SHEET)
+        except gspread.WorksheetNotFound:
+            self.overrides_ws = sh.add_worksheet(
+                SCHEDULE_OVERRIDES_SHEET, rows=500,
+                cols=len(SCHEDULE_OVERRIDES_HEADER))
+        vals = self.overrides_ws.get_all_values()
+        if not vals or vals[0] != SCHEDULE_OVERRIDES_HEADER:
+            self.overrides_ws.clear()
+            self.overrides_ws.append_row(SCHEDULE_OVERRIDES_HEADER,
+                                          value_input_option='RAW')
+
+    def get_schedule_overrides(self):
+        return self.overrides_ws.get_all_records()
+
+    def add_schedule_overrides_rows(self, rows):
+        payload = [[str(r.get(k, '')) for k in SCHEDULE_OVERRIDES_HEADER]
+                   for r in rows]
+        if payload:
+            self.overrides_ws.append_rows(payload, value_input_option='RAW')
+
+    def add(self, name, direction, train_time, travel_date, email=''):
+        self.ws.append_row([(name or '익명').strip(), (email or '').strip(),
+                            direction, train_time, travel_date,
                             datetime.now().isoformat(timespec='seconds')],
                            value_input_option='RAW')
 
     def add_many(self, rows):
-        """여러 예약을 단일 API 호출로 추가(분당 쓰기 한도 회피).
-
-        rows: (name, direction, ktx_time, travel_date) 튜플 리스트.
-        """
+        """rows: (name, direction, train_time, travel_date) 또는 (name, email, direction, train_time, travel_date)."""
         now = datetime.now().isoformat(timespec='seconds')
-        payload = [[(name or '익명').strip(), direction, ktx_time, travel_date, now]
-                   for name, direction, ktx_time, travel_date in rows]
+        payload = []
+        for row in rows:
+            if len(row) == 5:
+                name, email, direction, train_time, travel_date = row
+            else:
+                name, direction, train_time, travel_date = row
+                email = ''
+            payload.append([(name or '익명').strip(), (email or '').strip(),
+                            direction, train_time, travel_date, now])
         if payload:
             self.ws.append_rows(payload, value_input_option='RAW')
 
     def all_records(self):
         return self.ws.get_all_records()
 
-    def count(self, direction, ktx_time, travel_date):
+    def count(self, direction, train_time, travel_date):
         return sum(1 for r in self.all_records()
-                   if _match(r, direction, ktx_time, travel_date))
+                   if _match(r, direction, train_time, travel_date))
 
-    def names(self, direction, ktx_time, travel_date):
+    def names(self, direction, train_time, travel_date):
         return [str(r.get('name', '')) for r in self.all_records()
-                if _match(r, direction, ktx_time, travel_date)]
+                if _match(r, direction, train_time, travel_date)]
 
-    def clear_slot(self, direction, ktx_time, travel_date):
+    def clear_slot(self, direction, train_time, travel_date):
         kept = [r for r in self.all_records()
-                if not _match(r, direction, ktx_time, travel_date)]
+                if not _match(r, direction, train_time, travel_date)]
         self.ws.clear()
-        rows = [HEADER] + [[r.get('name'), r.get('direction'), r.get('ktx_time'),
-                            r.get('travel_date'), r.get('created_at')] for r in kept]
-        self.ws.append_rows(rows, value_input_option='RAW')  # 단일 호출
+        rows = [HEADER] + [[r.get('name'), r.get('email', ''), r.get('direction'),
+                            r.get('train_time'), r.get('travel_date'), r.get('created_at')]
+                           for r in kept]
+        self.ws.append_rows(rows, value_input_option='RAW')
+
+    def remove_one(self, name, direction, train_time, travel_date):
+        records = self.all_records()
+        target_idx = None
+        for i, r in enumerate(records):
+            if (_match(r, direction, train_time, travel_date)
+                    and str(r.get('name')) == name.strip()):
+                target_idx = i
+                break
+        if target_idx is None:
+            return False
+        kept = records[:target_idx] + records[target_idx + 1:]
+        self.ws.clear()
+        rows = [HEADER] + [[r.get('name'), r.get('email', ''), r.get('direction'),
+                            r.get('train_time'), r.get('travel_date'), r.get('created_at')]
+                           for r in kept]
+        self.ws.append_rows(rows, value_input_option='RAW')
+        return True
 
 
 class SheetsReservationStore(_SheetsStoreBase):
@@ -185,6 +262,7 @@ class SheetsReservationStore(_SheetsStoreBase):
         self._ensure_header()
         self._ensure_notif_ws(sh)
         self._ensure_carpool_ws(sh)
+        self._ensure_overrides_ws(sh)
 
 
 class ServiceAccountSheetsStore(_SheetsStoreBase):
@@ -230,6 +308,7 @@ class ServiceAccountSheetsStore(_SheetsStoreBase):
         self._ensure_header()
         self._ensure_notif_ws(sh)
         self._ensure_carpool_ws(sh)
+        self._ensure_overrides_ws(sh)
 
 
 def make_store():

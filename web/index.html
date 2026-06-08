@@ -15,6 +15,12 @@
   .card { box-shadow: 0 1px 3px rgba(0,0,0,.04), 0 8px 30px rgba(0,0,0,.06); }
   .toast { animation: pop .35s cubic-bezier(.16,1,.3,1); }
   @keyframes pop { from { opacity:0; transform: translateY(-12px) scale(.98);} to {opacity:1; transform:none;} }
+  .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #fff;
+          border-top-color: transparent; border-radius: 50%; animation: rot .7s linear infinite;
+          vertical-align: -2px; margin-right: 6px; }
+  .spin-d { border-color: #6b7280; border-top-color: transparent; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  button:disabled { opacity: .6; cursor: wait; }
 </style>
 </head>
 <body class="bg-[#fbfbfd] text-gray-900">
@@ -22,11 +28,10 @@
 <!-- Nav -->
 <nav class="nav-blur bg-white/70 fixed top-0 inset-x-0 z-50 border-b border-black/5">
   <div class="max-w-5xl mx-auto px-6 h-12 flex items-center justify-between text-[13px]">
-    <a href="index.html" class="font-semibold tracking-tight">UNIST Shuttle</a>
+    <a href="/" class="flex items-center"><img src="/static/unist-logo.png" alt="UNIST" class="h-7"></a>
     <div class="flex items-center gap-6 text-gray-500">
       <a href="#reserve" class="hover:text-gray-900 transition">예약</a>
       <a href="#carpool" class="hover:text-gray-900 transition">카풀</a>
-      <a href="#alerts" class="hover:text-gray-900 transition">알림</a>
     </div>
   </div>
 </nav>
@@ -44,11 +49,24 @@
 
   <!-- Reserve card -->
   <section id="reserve" class="bg-white rounded-3xl p-7 card mb-8">
+    <div class="mb-5 p-3 rounded-2xl bg-amber-50 text-amber-900 text-xs leading-relaxed">
+      <strong>📅 예약 가능 기간 안내</strong><br>
+      셔틀 시간표는 <b>매주 월요일 00시</b>에 수요 데이터로 갱신됩니다.
+      따라서 예약은 <b>오늘부터 이번 주 일요일까지</b>의 셔틀만 가능합니다.
+      다음 주 셔틀은 다음 월요일부터 예약 가능합니다.
+    </div>
     <div class="space-y-5">
-      <div>
-        <label class="block text-sm font-medium text-gray-500 mb-2">이름</label>
-        <input id="name" placeholder="홍길동"
-               class="w-full rounded-2xl bg-gray-100 px-4 py-3 outline-none focus:ring-2 ring-blue-500">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-500 mb-2">이름</label>
+          <input id="name" placeholder="홍길동"
+                 class="w-full rounded-2xl bg-gray-100 px-4 py-3 outline-none focus:ring-2 ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-500 mb-2">이메일 <span class="text-xs text-gray-400">(알림용)</span></label>
+          <input id="email" type="email" placeholder="you@unist.ac.kr"
+                 class="w-full rounded-2xl bg-gray-100 px-4 py-3 outline-none focus:ring-2 ring-blue-500">
+        </div>
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-500 mb-2">방향</label>
@@ -58,39 +76,34 @@
         </div>
       </div>
       <div>
-        <label class="block text-sm font-medium text-gray-500 mb-2">입력 방식</label>
-        <div class="grid grid-cols-2 gap-2" id="mode">
-          <button data-v="train" class="mode-btn rounded-2xl py-3 text-sm font-medium bg-blue-600 text-white">기차 연계</button>
-          <button data-v="time" class="mode-btn rounded-2xl py-3 text-sm font-medium bg-gray-100">단순 이동</button>
-        </div>
-      </div>
-      <div id="trainBox">
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-sm font-medium text-gray-500 mb-2">방면</label>
-            <select id="bound" class="w-full rounded-2xl bg-gray-100 px-4 py-3 outline-none"></select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-500 mb-2">열차 시각</label>
-            <select id="train" class="w-full rounded-2xl bg-gray-100 px-4 py-3 outline-none"></select>
-          </div>
-        </div>
-      </div>
-      <div id="timeBox" class="hidden">
-        <label class="block text-sm font-medium text-gray-500 mb-2">출발 희망 시각 (HH:MM)</label>
-        <input id="desire" placeholder="13:40" class="w-full rounded-2xl bg-gray-100 px-4 py-3 outline-none focus:ring-2 ring-blue-500">
-      </div>
-      <div>
         <label class="block text-sm font-medium text-gray-500 mb-2">날짜</label>
         <input id="date" type="date" class="w-full rounded-2xl bg-gray-100 px-4 py-3 outline-none">
       </div>
+      <div id="gridBox">
+        <label class="block text-sm font-medium text-gray-500 mb-2">셔틀 시각 (1시간 간격)</label>
+        <select id="gridSel" class="w-full rounded-2xl bg-gray-100 px-4 py-3 outline-none"></select>
+        <p class="text-xs text-gray-400 mt-1">⭐ 표시된 시각 = 항상 운행되는 고정 셔틀 · 그 외 = 8명 모이면 운행되는 조건부 셔틀</p>
+      </div>
 
       <div class="flex gap-3 pt-1">
-        <button onclick="checkStatus()" class="flex-1 rounded-2xl py-3.5 font-medium bg-gray-100 hover:bg-gray-200 transition">현황 보기</button>
-        <button onclick="reserve()" class="flex-[2] rounded-2xl py-3.5 font-semibold bg-blue-600 text-white hover:bg-blue-700 transition">예약하기</button>
+        <button onclick="checkStatus(event)" class="flex-1 rounded-2xl py-3.5 font-medium bg-gray-100 hover:bg-gray-200 transition">현황 보기</button>
+        <button onclick="reserve(event)" class="flex-[2] rounded-2xl py-3.5 font-semibold bg-blue-600 text-white hover:bg-blue-700 transition">예약하기</button>
       </div>
     </div>
     <div id="result" class="hidden mt-5 rounded-2xl bg-blue-50 text-blue-900 p-4 text-[15px] leading-relaxed"></div>
+    <div id="trace" class="hidden mt-3 text-sm text-gray-500"></div>
+  </section>
+
+  <!-- My reservations -->
+  <section class="bg-white rounded-3xl p-7 card mb-8">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="text-xl font-semibold">📋 내 예약</h2>
+      <button onclick="loadMy()" class="text-sm text-blue-600 font-medium hover:underline">새로고침</button>
+    </div>
+    <p class="text-gray-500 text-sm mb-3">잠정→확정 흐름: 출발 2시간 전 마감 시 운행/미운행이 결정되고 이메일로 알림이 갑니다.</p>
+    <ul id="myRes" class="space-y-2 text-[15px]">
+      <li class="text-gray-400">이름을 입력하면 내 예약 목록이 표시됩니다.</li>
+    </ul>
   </section>
 
   <!-- Live 513 -->
@@ -111,36 +124,28 @@
       <h2 class="text-xl font-semibold">🚍 셔틀 운행 계획</h2>
       <span id="planDate" class="text-sm text-gray-400"></span>
     </div>
-    <p class="text-gray-500 text-sm mb-3">선택한 날짜의 운행 예정 셔틀 · 예약 실시간 반영</p>
-    <ul id="plan" class="space-y-2 text-[15px]"><li class="text-gray-400">불러오는 중…</li></ul>
+    <p class="text-gray-500 text-sm mb-3">선택한 날짜의 모든 슬롯 · 예약 실시간 반영 (🟢 운행 / 🟡 모집 중 / ⚪ 신청 없음 / 🔴 미운행)</p>
+    <div class="flex gap-2 mb-3 text-sm">
+      <button data-pf="to_station" class="plan-filter rounded-full px-3 py-1 bg-blue-600 text-white">울산역행</button>
+      <button data-pf="to_campus" class="plan-filter rounded-full px-3 py-1 bg-gray-100">캠퍼스행</button>
+    </div>
+    <ul id="plan" class="space-y-1.5 text-[15px] max-h-96 overflow-y-auto pr-1"><li class="text-gray-400">불러오는 중…</li></ul>
   </section>
 
   <!-- Carpool -->
   <section id="carpool" class="bg-white rounded-3xl p-7 card mb-8">
     <h2 class="text-xl font-semibold mb-1">🚕 카풀</h2>
-    <p class="text-gray-500 text-sm mb-4">셔틀이 없을 때 같은 시각 학생끼리 최대 4명 그룹으로 자동 편성됩니다.</p>
-    <div class="flex gap-3">
-      <button onclick="carpoolSignup()" class="flex-1 rounded-2xl py-3 font-medium bg-gray-900 text-white hover:bg-gray-700 transition">카풀 신청</button>
-      <button onclick="carpoolFinalize()" class="flex-1 rounded-2xl py-3 font-medium bg-gray-100 hover:bg-gray-200 transition">지금 확정(데모)</button>
-    </div>
-    <div id="carpoolOut" class="hidden mt-4 rounded-2xl bg-gray-50 p-4 text-[15px] leading-relaxed"></div>
+    <p class="text-gray-500 text-sm mb-4">셔틀이 미운행될 때 같은 시각 이동하는 학생끼리 오픈채팅에서 카풀을 구하세요.</p>
+    <a href="https://open.kakao.com/o/ge40mZxi" target="_blank" rel="noopener"
+       class="block w-full text-center rounded-2xl py-3 font-medium bg-[#FEE500] text-[#3C1E1E] hover:bg-yellow-300 transition">
+      💬 오픈카톡 입장하기
+    </a>
   </section>
 
-  <!-- Alerts -->
-  <section id="alerts" class="bg-white rounded-3xl p-7 card">
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="text-xl font-semibold">🔔 실시간 알림</h2>
-      <button onclick="checkAlerts()" class="text-sm text-blue-600 font-medium hover:underline">지금 체크</button>
-    </div>
-    <button onclick="simDelay()" class="w-full mb-4 rounded-2xl py-2.5 text-sm font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 transition">⚠️ 지연 시뮬레이션 (데모)</button>
-    <ul id="feed" class="space-y-2 text-[15px] text-gray-700"><li class="text-gray-400">알림 없음</li></ul>
-  </section>
 </main>
 
-<footer class="py-10 text-center text-sm text-gray-400">UNIST 생산운영관리 텀프로젝트 · 2026</footer>
-
 <script>
-const state = { direction: 'to_station', mode: 'train' };
+const state = { direction: 'to_station' };
 const $ = id => document.getElementById(id);
 
 function toast(msg) {
@@ -156,97 +161,211 @@ function pickGroup(sel, value) {
     b.classList.toggle('bg-gray-100', !on);
   });
 }
-document.querySelectorAll('.dir-btn').forEach(b => b.onclick = () => { state.direction=b.dataset.v; pickGroup('.dir-btn', b.dataset.v); });
-document.querySelectorAll('.mode-btn').forEach(b => b.onclick = () => {
-  state.mode=b.dataset.v; pickGroup('.mode-btn', b.dataset.v);
-  $('trainBox').classList.toggle('hidden', b.dataset.v!=='train');
-  $('timeBox').classList.toggle('hidden', b.dataset.v!=='time');
+document.querySelectorAll('.dir-btn').forEach(b => b.onclick = () => {
+  state.direction=b.dataset.v; pickGroup('.dir-btn', b.dataset.v);
+  fillGrid();
 });
 
-let TT = {};
+let GRID = null;
+
+// 예약 가능 윈도우: 오늘 ~ 다음 월요일 직전(=이번 주 일요일).
+// HTML date 입력에 min/max를 설정해 사용자가 윈도우 밖 날짜를 못 고르게 한다.
+function _bookingWindow() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const wd = today.getDay();           // 일=0, 월=1, ..., 토=6
+  const daysToSun = wd === 0 ? 0 : 7 - wd;   // 이번 주 일요일까지
+  const sun = new Date(today); sun.setDate(today.getDate() + daysToSun);
+  const iso = d => d.toISOString().slice(0,10);
+  return { min: iso(today), max: iso(sun) };
+}
+
 async function init() {
-  $('date').value = new Date().toISOString().slice(0,10);
-  TT = await (await fetch('/api/timetable')).json();
-  const bsel = $('bound');
-  bsel.innerHTML = Object.entries(TT).map(([k,v]) => `<option value="${k}">${v.label}</option>`).join('');
-  fillTrains();
-  bsel.onchange = fillTrains;
-  $('date').onchange = loadPlan;
-  refreshFeed(); loadBis(); loadPlan();
-  setInterval(() => { pollAlerts(); loadBis(); }, 15000);
+  const win = _bookingWindow();
+  const dateInput = $('date');
+  dateInput.value = win.min;
+  dateInput.min = win.min;
+  dateInput.max = win.max;
+  // 이름/이메일은 새로고침 시 매번 비운다 (이전에 입력한 정보가 남으면 안 됨)
+  $('name').value = '';
+  $('email').value = '';
+  localStorage.removeItem('shuttle_name');
+  localStorage.removeItem('shuttle_email');
+  GRID = await (await fetch('/api/grid')).json();
+  fillGrid();
+  $('date').onchange = () => { loadPlan(); fillGrid(); };
+  $('name').onchange = () => { loadMy(); };
+  loadBis(); loadPlan(); loadMy();
+  // BIS는 quota 제약으로 60초마다, 나머지(예약·계획)는 15초마다 갱신
+  setInterval(() => { loadMy(); loadPlan(); }, 15000);
+  setInterval(() => { loadBis(); }, 60000);
+}
+async function loadMy() {
+  const nm = ($('name').value||'').trim();
+  const ul = $('myRes');
+  if (!nm) { ul.innerHTML = '<li class="text-gray-400">이름을 입력하면 내 예약 목록이 표시됩니다.</li>'; return; }
+  const d = await (await fetch('/api/my?name=' + encodeURIComponent(nm))).json();
+  if (!d.reservations || !d.reservations.length) {
+    ul.innerHTML = '<li class="text-gray-400">예약 내역이 없습니다.</li>'; return;
+  }
+  ul.innerHTML = d.reservations.map(r => {
+    const color = r.status.includes('확정') ? 'text-green-600'
+               : r.status.includes('미운행') ? 'text-red-500'
+               : 'text-gray-600';
+    const btn = r.cancellable
+      ? `<button onclick="cancelRes('${r.direction}','${r.train_time}','${r.travel_date}')"
+                 class="text-xs text-red-500 hover:underline ml-2">취소</button>`
+      : '';
+    return `<li class="flex items-center justify-between border-b border-gray-100 pb-2">
+      <span>${r.travel_date} ${r.train_time} · ${r.dir_kr}
+        <span class="text-gray-400 text-sm">(셔틀 ${r.shuttle_time||'-'})</span></span>
+      <span class="${color} font-medium text-sm">${r.status}${btn}</span></li>`;
+  }).join('');
+}
+async function cancelRes(direction, train_time, travel_date) {
+  const name = ($('name').value||'').trim();
+  if (!name) return toast('⚠️ 이름이 필요합니다');
+  if (!confirm(`${travel_date} ${train_time} 예약을 취소할까요?`)) return;
+  const d = await post('/api/cancel', {name, direction, train_time, travel_date});
+  toast(d.ok ? '✅ ' + d.message : '⚠️ ' + (d.info||'취소 실패'));
+  loadMy(); loadPlan();
 }
 async function loadBis() {
   try {
     const d = await (await fetch('/api/bis')).json();
     const cell = (label, x) => {
-      const t = x && x.found ? `${x.arrival_min}분 후 도착` : '도착 예정 없음';
+      // 우선순위: 도착 정보 > 백엔드 note(quota·에러 등) > 기본 메시지
+      const t = x && x.found
+        ? `${x.arrival_min}분 후 도착`
+        : (x && x.note ? x.note : '도착 예정 없음');
       const sub = x && x.found && x.present_stop ? `현재 ${x.present_stop}` : '';
       return `<div class="rounded-2xl bg-gray-50 p-4"><div class="text-gray-500 text-sm">${label}</div>`
-           + `<div class="font-semibold mt-1">${t}</div><div class="text-xs text-gray-400 mt-0.5">${sub}</div></div>`;
+           + `<div class="font-semibold mt-1 text-sm">${t}</div><div class="text-xs text-gray-400 mt-0.5">${sub}</div></div>`;
     };
     $('bis').innerHTML = cell('울산과학기술원 정류장', d.unist) + cell('울산역 정류장', d.ulsan);
   } catch(e) { $('bis').innerHTML = '<div class="text-gray-400">실시간 정보를 불러올 수 없습니다.</div>'; }
 }
+let PLAN_DATA = [];
+let PLAN_FILTER = 'to_station';
 async function loadPlan() {
   const date = $('date').value;
   try {
     const d = await (await fetch('/api/plan?date='+date)).json();
     $('planDate').textContent = `${d.date} ${d.weekday||''}`;
-    const ul = $('plan');
-    ul.innerHTML = (d.shuttles && d.shuttles.length)
-      ? d.shuttles.map(s => `<li class="flex items-center justify-between border-b border-gray-100 pb-2">`
-          + `<span>${s.shuttle_time} · ${s.slot} <span class="text-gray-400 text-sm">(${s.dir_kr})</span></span>`
-          + `<span class="${s.run?'text-green-600':'text-gray-400'} font-medium text-sm">${s.status}</span></li>`).join('')
-      : '<li class="text-gray-400">이 날짜에 예정된 셔틀이 없습니다.</li>';
+    PLAN_DATA = d.shuttles || [];
+    renderPlan();
   } catch(e) {}
 }
-function fillTrains() {
-  const b = $('bound').value;
-  $('train').innerHTML = (TT[b]?.options||[]).map(o => `<option value="${o}">${o}</option>`).join('');
+function renderPlan() {
+  const ul = $('plan');
+  let rows = PLAN_DATA.filter(s => s.direction === PLAN_FILTER);
+  if (!rows.length) { ul.innerHTML = '<li class="text-gray-400">표시할 슬롯이 없습니다.</li>'; return; }
+  ul.innerHTML = rows.map(s => {
+    const star = s.is_fixed ? ' ⭐' : '';
+    const colorClass = s.run ? 'text-green-600 font-semibold'
+                       : (s.count > 0 ? 'text-amber-600' : 'text-gray-400');
+    return `<li class="flex items-center justify-between border-b border-gray-100 py-1.5">
+      <span class="font-mono text-sm">${s.shuttle_time}${star}</span>
+      <span class="${colorClass} text-xs">${s.status}</span>
+    </li>`;
+  }).join('');
+}
+document.querySelectorAll('.plan-filter').forEach(b => b.onclick = () => {
+  PLAN_FILTER = b.dataset.pf;
+  document.querySelectorAll('.plan-filter').forEach(x => {
+    const on = x.dataset.pf === PLAN_FILTER;
+    x.classList.toggle('bg-blue-600', on);
+    x.classList.toggle('text-white', on);
+    x.classList.toggle('bg-gray-100', !on);
+  });
+  renderPlan();
+});
+function fillGrid() {
+  if (!GRID) return;
+  const dir = state.direction;
+  const date = $('date').value;
+  const wd = date ? (new Date(date).getDay() + 6) % 7 : -1;  // JS Sun=0 → Mon=0
+  const fixedSet = new Set((GRID[dir].fixed||[]).filter(f => f.wd===wd).map(f => f.shuttle));
+  const opts = GRID[dir].grid.map(t => {
+    const star = fixedSet.has(t) ? ' ⭐ 고정' : '';
+    return `<option value="${t}">${t}${star}</option>`;
+  }).join('');
+  $('gridSel').innerHTML = opts;
 }
 function payload() {
-  return { name: $('name').value||'학생', direction: state.direction, mode: state.mode,
-           train_time: $('train').value, desire_time: $('desire').value, travel_date: $('date').value };
+  const email = ($('email').value||'').trim();
+  if (email) localStorage.setItem('shuttle_email', email);
+  const name = ($('name').value||'').trim();
+  if (name) localStorage.setItem('shuttle_name', name);
+  return { name: name||'학생', email, direction: state.direction,
+           mode: 'grid', train_time: $('gridSel').value,
+           travel_date: $('date').value };
 }
 async function post(url, body) {
   const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{})});
   return r.json();
 }
-async function checkStatus() {
-  const d = await post('/api/status', payload());
-  if (!d.ok) return toast('⚠️ ' + d.info);
-  const svc = d.service==='fixed'?'고정 셔틀':d.service==='conditional'?'조건부 셔틀':'배차 셔틀 없음';
-  const sh = d.shuttle_time? ` (${d.shuttle_time} 출발)`:'';
-  show('result', `📋 ${d.travel_date} ${d.ktx_time} · 예약 ${d.reservations}/${d.n_star}명<br>🚌 ${svc}${sh}`);
+function busy(btn, label) {
+  if (!btn) return () => {};
+  const original = btn.innerHTML;
+  const dark = btn.classList.contains('bg-gray-100');
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin ${dark?'spin-d':''}"></span>${label || '처리 중...'}`;
+  return () => { btn.disabled = false; btn.innerHTML = original; };
 }
-async function reserve() {
-  const d = await post('/api/reserve', payload());
-  if (!d.ok) return toast('⚠️ ' + d.info);
-  show('result', d.message);
-  (d.new_alerts||[]).forEach(m => toast('🔔 ' + m));
-  refreshFeed(); loadPlan();
+async function checkStatus(ev) {
+  const done = busy(ev && ev.currentTarget, '확인 중...');
+  try {
+    const d = await post('/api/status', payload());
+    if (!d.ok) return toast('⚠️ ' + d.info);
+    const svc = d.service==='fixed'?'고정 셔틀':d.service==='conditional'?'조건부 셔틀':'배차 셔틀 없음';
+    const sh = d.shuttle_time? ` (${d.shuttle_time} 출발)`:'';
+    show('result', `📋 ${d.travel_date} ${d.train_time} · 예약 ${d.reservations}/${d.n_star}명<br>🚌 ${svc}${sh}`);
+  } finally { done(); }
 }
-async function carpoolSignup() {
-  const d = await post('/api/carpool/signup', payload());
-  if (!d.ok) return toast('⚠️ ' + d.info);
-  show('carpoolOut', d.message);
+async function reserve(ev) {
+  const done = busy(ev && ev.currentTarget, '에이전트 처리 중...');
+  try {
+    const d = await post('/api/reserve', payload());
+    if (!d.ok) return toast('⚠️ ' + d.info);
+    show('result', d.message);
+    if (d.trace && d.trace.length) {
+      show('trace', '🤖 처리 과정: ' + d.trace.map((t,i)=>`${i+1}. ${t}`).join('  →  '));
+    }
+    loadPlan(); loadMy();
+  } finally { done(); }
 }
-async function carpoolFinalize() {
-  const d = await post('/api/carpool/finalize');
-  show('carpoolOut', (d.groups||[]).join('<br>') || '카풀 신청 없음');
+async function carpoolSignup(ev) {
+  const done = busy(ev && ev.currentTarget, '신청 중...');
+  try {
+    const d = await post('/api/carpool/signup', payload());
+    if (!d.ok) return toast('⚠️ ' + d.info);
+    show('carpoolOut', d.message);
+  } finally { done(); }
 }
-async function checkAlerts() { const d = await post('/api/notify/check'); d.new?.forEach(m=>toast('🔔 '+m)); refreshFeed(); }
-async function simDelay() { const d = await post('/api/notify/delay'); d.new?.forEach(m=>toast('🔔 '+m)); refreshFeed(); }
-async function pollAlerts() { const d = await post('/api/notify/check'); if (d.new?.length) d.new.forEach(m=>toast('🔔 '+m)); refreshFeed(); }
-async function refreshFeed() {
-  const d = await (await fetch('/api/notifications')).json();
-  const ul = $('feed');
-  ul.innerHTML = (d.notifications||[]).length
-    ? d.notifications.map(m=>`<li class="border-b border-gray-100 pb-2">${m}</li>`).join('')
-    : '<li class="text-gray-400">알림 없음</li>';
+async function carpoolFinalize(ev) {
+  const done = busy(ev && ev.currentTarget, '편성 중...');
+  try {
+    const d = await post('/api/carpool/finalize');
+    show('carpoolOut', (d.groups||[]).join('<br>') || '카풀 신청 없음');
+  } finally { done(); }
 }
 function show(id, html) { const e=$(id); e.innerHTML=html; e.classList.remove('hidden'); }
 init();
+
+// 개발용 자동 새로고침 — 파일 수정시각이 바뀌면 페이지 reload
+(async () => {
+  if (!/127\.0\.0\.1|localhost/.test(location.hostname)) return;
+  let baseline = null;
+  while (true) {
+    try {
+      const r = await fetch('/api/_mtime', {cache: 'no-store'});
+      const {mtime} = await r.json();
+      if (baseline === null) baseline = mtime;
+      else if (mtime !== baseline) { location.reload(); return; }
+    } catch (e) { /* 서버 reload 중 — 무시 */ }
+    await new Promise(r => setTimeout(r, 700));
+  }
+})();
 </script>
 </body>
 </html>

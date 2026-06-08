@@ -1,0 +1,40 @@
+name: Deploy to Hugging Face Spaces
+
+# main 브랜치에 push되면 변경된 경로를 감지해
+#  • jaeeewons/unist-shuttle-web (FastAPI 학생 앱)
+#  • jaeeewons/unist-shuttle-admin (Streamlit 관리자 대시보드)
+# 두 Space에 자동 sync.
+#
+# 사전 셋업: Repository → Settings → Secrets and variables → Actions
+#   New repository secret: Name=HF_TOKEN, Value=hf_... (Write 권한)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api.py'
+      - 'web/**'
+      - 'shuttle_system/**'
+      - 'legacy/app_admin_streamlit.py'
+      - 'requirements.txt'
+      - '.github/workflows/deploy-hf.yml'
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # 변경 파일 diff용
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install --quiet huggingface_hub
+
+      - name: Deploy to both Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python .github/workflows/deploy_hf.py
