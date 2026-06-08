@@ -11,6 +11,7 @@ from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from shuttle_system.storage import make_store
@@ -21,12 +22,14 @@ from shuttle_system.recommend import recommend, slot_status, resolve_ktx, weekda
 from shuttle_system.agents.data_agent import fetch_513_arrival
 from shuttle_system.agents.alert_agent import run_notification_check
 from shuttle_system.agents.carpool_agent import form_carpool_groups, group_message
-from shuttle_system.kakao import send_to_me as kakao_send
+# 카카오톡 알림은 제거됨 — 이메일(Resend/Gmail SMTP) 단일 채널로 운영
+from shuttle_system.emailer import notify_slot as email_notify_slot, send_confirmation
 
 app = FastAPI(title='UNIST Shuttle API')
 store = make_store()
 FARE = POLICY_FARE
 WEB = Path(__file__).parent / 'web'
+app.mount('/static', StaticFiles(directory=WEB / 'static'), name='static')
 
 # 결정론 멀티 에이전트 흐름 (LLM 미사용). LLM은 운영 리포트 서술 등 안전한 영역에만.
 # Orchestrator(LLM planner)는 메시지 왜곡 위험으로 메인 흐름에서 제외했다.
@@ -41,6 +44,13 @@ def _today():
 @app.get('/')
 def index():
     return FileResponse(WEB / 'index.html')
+
+
+@app.get('/api/_mtime')
+def api_mtime():
+    """개발용: web/index.html + api.py 최신 수정시각. 브라우저가 폴링해 자동 새로고침."""
+    files = [WEB / 'index.html', Path(__file__)]
+    return {'mtime': max(f.stat().st_mtime for f in files if f.exists())}
 
 
 # ── 시간표 옵션 ──────────────────────────────────────
@@ -81,12 +91,13 @@ def api_status(req: StatusReq):
     if ktx is None:
         return JSONResponse({'ok': False, 'info': info}, status_code=400)
     st = slot_status(store, req.direction, ktx, date, FARE)
-    return {'ok': True, 'ktx_time': ktx, 'info': info, 'travel_date': date, **st}
+    return {'ok': True, 'train_time': ktx, 'info': info, 'travel_date': date, **st}
 
 
 # ── 예약 ─────────────────────────────────────────────
 class ReserveReq(StatusReq):
     name: str = '학생'
+    email: str = ''
 
 
 @app.post('/api/reserve')
@@ -97,15 +108,28 @@ def api_reserve(req: ReserveReq):
                             _opt_time(req.train_time), req.desire_time, date, FARE)
     if ktx is None:
         return JSONResponse({'ok': False, 'info': info}, status_code=400)
-    rec = recommend(store, req.name, req.direction, ktx, date, FARE)
+    rec = recommend(store, req.name, req.direction, ktx, date, FARE, email=req.email)
     trace = ['추천 에이전트']
-    # 2) 알림 에이전트 — 능동 감지(예약 직후) + 카톡 발송
+    # 2) 즉시 메일 — 모든 예약자에게 발송 (고정/조건부 모두)
+    #    · 고정 셔틀 또는 이미 N* 넘은 조건부 → 확정 메일
+    #    · 조건부 N* 미달 → 잠정 예약 메일 (마감 시점에 다시 안내)
+    n_star = breakeven_N(FARE)
+    svc = rec.get('service')
+    count_after = rec.get('reservations') or 0
+    is_confirmed = (svc == 'fixed') or (svc == 'conditional' and count_after >= n_star)
+    if rec.get('booked') and req.email:
+        send_confirmation(req.email, req.name, req.direction,
+                          rec.get('shuttle_time') or ktx, date, svc,
+                          tentative=not is_confirmed,
+                          reservations=count_after, required=n_star)
+        trace.append('이메일 발송')
+    # 3) 알림 에이전트 — N* 첫 충족 시 탑승자 전원에게 단체 이메일 발송 (카톡 제거, 이메일 only)
     before = len(store.all_notifications())
-    run_notification_check(store, fare=FARE, pusher=kakao_send)
+    run_notification_check(store, fare=FARE, emailer_fn=email_notify_slot)
     new_msgs = [n.get('message', '') for n in store.all_notifications()[before:]]
     if new_msgs:
         trace.append('알림 에이전트')
-    return {'ok': True, 'ktx_time': ktx, 'info': info, 'travel_date': date,
+    return {'ok': True, 'train_time': ktx, 'info': info, 'travel_date': date,
             'trace': trace, 'new_alerts': new_msgs, **rec}
 
 
@@ -127,7 +151,7 @@ def api_my(name: str = None):
         if str(r.get('name')) != nm:
             continue
         direction = str(r.get('direction'))
-        ktx = str(r.get('ktx_time'))
+        ktx = str(r.get('train_time'))
         date = str(r.get('travel_date'))
         try:
             from datetime import datetime
@@ -147,16 +171,16 @@ def api_my(name: str = None):
             status = f'잠정 ({n}/{breakeven_N(FARE)}명)'
         out.append({
             'direction': direction, 'dir_kr': '울산역행' if direction == 'to_station' else '캠퍼스행',
-            'ktx_time': ktx, 'travel_date': date, 'shuttle_time': slot.get('shuttle_time'),
+            'train_time': ktx, 'travel_date': date, 'shuttle_time': slot.get('shuttle_time'),
             'service': slot['service'], 'phase': phase, 'status': status,
-            'cancellable': phase != 'closed' and slot['service'] != 'fixed'})
+            'cancellable': phase != 'closed'})
     return {'reservations': out}
 
 
 class CancelReq(BaseModel):
     name: str
     direction: str
-    ktx_time: str
+    train_time: str
     travel_date: str
 
 
@@ -168,14 +192,11 @@ def api_cancel(req: CancelReq):
         wd = datetime.strptime(req.travel_date, '%Y-%m-%d').weekday()
     except ValueError:
         return JSONResponse({'ok': False, 'info': '날짜 오류'}, status_code=400)
-    slot = find_shuttle_slot(req.direction, req.ktx_time, wd, fare=FARE)
-    if slot.get('service') == 'fixed':
-        return JSONResponse({'ok': False, 'info': '고정 셔틀은 취소 대상이 아닙니다.'},
-                            status_code=400)
-    if slot_phase(slot.get('shuttle_time') or req.ktx_time, req.travel_date) == 'closed':
+    slot = find_shuttle_slot(req.direction, req.train_time, wd, fare=FARE)
+    if slot_phase(slot.get('shuttle_time') or req.train_time, req.travel_date) == 'closed':
         return JSONResponse({'ok': False, 'info': '마감 후엔 취소할 수 없습니다.'},
                             status_code=400)
-    ok = store.remove_one(req.name, req.direction, req.ktx_time, req.travel_date)
+    ok = store.remove_one(req.name, req.direction, req.train_time, req.travel_date)
     if not ok:
         return JSONResponse({'ok': False, 'info': '해당 예약을 찾지 못했습니다.'},
                             status_code=404)
@@ -192,7 +213,7 @@ def api_carpool_signup(req: CarpoolReq):
     store.add_carpool_request(req.name, req.direction, ktx, date)
     groups = form_carpool_groups(store)
     mine = [g for g in groups if req.name in g['members'] and g['direction'] == req.direction
-            and g['ktx_time'] == ktx and g['travel_date'] == date]
+            and g['train_time'] == ktx and g['travel_date'] == date]
     return {'ok': True, 'message': group_message(mine[0]) if mine else '카풀 신청 완료 (편성 대기)'}
 
 
@@ -208,18 +229,54 @@ def api_notifications(name: str = None):
     """내 알림: 그 사람이 예약한 슬롯의 알림만. 이름 없으면 빈 목록."""
     if not (name and name.strip()):
         return {'notifications': []}
-    mine = {(str(r.get('direction')), str(r.get('ktx_time')), str(r.get('travel_date')))
+    mine = {(str(r.get('direction')), str(r.get('train_time')), str(r.get('travel_date')))
             for r in store.all_records() if str(r.get('name')) == name.strip()}
     notes = [n for n in store.all_notifications()
-             if (str(n.get('direction')), str(n.get('ktx_time')),
+             if (str(n.get('direction')), str(n.get('train_time')),
                  str(n.get('travel_date'))) in mine]
     return {'notifications': [n.get('message', '') for n in notes[-12:][::-1]]}
 
 
 @app.post('/api/notify/check')
 def api_notify_check():
-    new = run_notification_check(store, fare=FARE, pusher=kakao_send)
+    new = run_notification_check(store, fare=FARE, emailer_fn=email_notify_slot)
     return {'ok': True, 'new': [n['message'] for n in new]}
+
+
+def _mask_name(nm):
+    """한글 이름 익명화: 2자→홍*, 3자→홍*동, 4자+→홍**동 형식."""
+    s = (nm or '').strip()
+    if not s:
+        return '익명'
+    if len(s) == 1:
+        return s + '*'
+    if len(s) == 2:
+        return s[0] + '*'
+    return s[0] + '*' * (len(s) - 2) + s[-1]
+
+
+# ── 전체 예약 현황 (공개·익명화) ──────────────────────
+@app.get('/api/reservations')
+def api_reservations(date: str = None):
+    """선택 날짜의 모든 예약을 슬롯별로 그룹화해 익명 명단으로 반환."""
+    target = (date or '').strip() or _today()
+    groups = {}
+    for r in store.all_records():
+        if str(r.get('travel_date')) != target:
+            continue
+        key = (str(r.get('direction')), str(r.get('train_time')))
+        groups.setdefault(key, []).append(_mask_name(r.get('name')))
+    out = []
+    for (direction, t), names in groups.items():
+        out.append({
+            'direction': direction,
+            'dir_kr': '울산역행' if direction == 'to_station' else '캠퍼스행',
+            'shuttle_time': t,
+            'count': len(names),
+            'names': names,
+        })
+    out.sort(key=lambda x: (x['shuttle_time'], 0 if x['direction'] == 'to_station' else 1))
+    return {'ok': True, 'date': target, 'slots': out, 'total': sum(len(g['names']) for g in out)}
 
 
 # ── 실시간 513 (BIS) ────────────────────────────────
@@ -234,6 +291,8 @@ def api_bis():
     return {'unist': safe('to_station'), 'ulsan': safe('to_campus')}
 
 
+
+
 # ── 셔틀 운행 계획 (해당 요일, 모든 그리드 슬롯 + 예약 반영 실시간) ───────
 @app.get('/api/plan')
 def api_plan(date: str = None):
@@ -243,10 +302,11 @@ def api_plan(date: str = None):
     except ValueError:
         return JSONResponse({'ok': False, 'info': '날짜 형식 오류'}, status_code=400)
     from shuttle_system.core.schedule import (
-        daily_dispatch, grid_options, SHUTTLE_FIXED,
+        daily_dispatch, grid_options, SHUTTLE_FIXED, slot_phase, VEHICLE_CAPACITY,
     )
     disp = daily_dispatch(store, date, FARE)
     n_star = disp['n_star']
+    cap = VEHICLE_CAPACITY
 
     def _dir_kr(d):
         return '울산역행' if d == 'to_station' else '캠퍼스행'
@@ -266,7 +326,7 @@ def api_plan(date: str = None):
     counts = {}
     for r in store.all_records():
         if str(r.get('travel_date')) == date:
-            k = (str(r.get('direction')), str(r.get('ktx_time')))
+            k = (str(r.get('direction')), str(r.get('train_time')))
             counts[k] = counts.get(k, 0) + 1
 
     # 4) 모든 그리드 슬롯을 양방향으로 나열
@@ -279,21 +339,21 @@ def api_plan(date: str = None):
             slot_label = fixed_map.get(key, f'{t} 그리드')
             if key in confirmed_map:
                 if is_fixed:
-                    status, run, svc = '🟢 운행 확정 (고정)', True, 'fixed'
+                    status, run, svc = f'🟢 운행 확정 (고정 · {count}/{cap}명)', True, 'fixed'
                 else:
-                    status, run, svc = f'🟢 운행 확정 ({count}/{n_star}명)', True, 'conditional'
+                    status, run, svc = f'🟢 운행 확정 ({count}/{cap}명)', True, 'conditional'
             elif key in bumped_map:
                 status, run, svc = f"🔴 미운행 ({bumped_map[key]['reason']})", False, 'conditional'
             elif is_fixed:
-                # 고정인데 disp에 없는 경우(거의 없음): 항상 운행
-                status, run, svc = '🟢 운행 확정 (고정)', True, 'fixed'
+                status, run, svc = f'🟢 운행 확정 (고정 · {count}/{cap}명)', True, 'fixed'
             elif count >= n_star:
-                # 이미 dispatch에서 처리됐어야 하지만 안전망
-                status, run, svc = f'🟢 운행 확정 ({count}/{n_star}명)', True, 'conditional'
+                status, run, svc = f'🟢 운행 확정 ({count}/{cap}명)', True, 'conditional'
+            elif slot_phase(t, date) == 'closed':
+                status, run, svc = f'🔴 미운행 (예약 부족 · {count}/{cap}명)', False, 'conditional'
             elif count > 0:
-                status, run, svc = f'🟡 모집 중 ({count}/{n_star}명)', False, 'conditional'
+                status, run, svc = f'🟡 모집 중 ({count}/{cap}명)', False, 'conditional'
             else:
-                status, run, svc = f'⚪ 신청 없음 (0/{n_star}명)', False, 'conditional'
+                status, run, svc = f'⚪ 신청 없음 (0/{cap}명)', False, 'conditional'
             shuttles.append({
                 'slot': slot_label, 'direction': direction, 'dir_kr': _dir_kr(direction),
                 'shuttle_time': t, 'ktx': t, 'service': svc,

@@ -66,7 +66,7 @@ def test_pusher_exception_does_not_break():
 def test_notification_store_roundtrip():
     s = MemoryReservationStore()
     s.add_notification({'type': 'dispatch', 'direction': 'to_station',
-                        'ktx_time': '13:10', 'travel_date': '2026-06-04', 'message': 'hi'})
+                        'train_time': '13:10', 'travel_date': '2026-06-04', 'message': 'hi'})
     notes = s.all_notifications()
     assert len(notes) == 1
     assert notes[0]['message'] == 'hi'

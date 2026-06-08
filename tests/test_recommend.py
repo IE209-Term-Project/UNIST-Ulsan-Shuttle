@@ -53,7 +53,7 @@ def test_slot_status_no_booking():
     assert st['service'] == 'conditional'
 
 
-def test_resolve_ktx_time_mode_matches_near_shuttle():
+def test_resolve_train_time_mode_matches_near_shuttle():
     s = MemoryReservationStore()
     # 목요일 13:40 → 가장 가까운 to_station 그리드(:10) = 13:10 또는 14:10 (둘 다 30분 차)
     ktx, info = resolve_ktx(s, 'to_station', 'time', None, '13:40', '2026-06-04')

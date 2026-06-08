@@ -33,8 +33,8 @@ class Orchestrator:
     def _build_tools(self):
         return {
             # 추천 전담: 결정론 recommend (셔틀→513→택시/카풀 판단 + 예약). LLM 미사용 → 빠르고 일관적.
-            'recommend_transport': lambda name, direction, ktx_time, travel_date, allow_booking=False:
-                recommend(self.store, name, direction, ktx_time, travel_date, self.fare,
+            'recommend_transport': lambda name, direction, train_time, travel_date, allow_booking=False:
+                recommend(self.store, name, direction, train_time, travel_date, self.fare,
                           do_book=allow_booking)['message'],
             # 능동 감지: AlertAgent (dispatch/carpool/delay 이벤트 → 알림 생성·발송)
             'detect_and_notify': lambda: json.dumps(
@@ -69,7 +69,7 @@ class Orchestrator:
                 msg = resp.choices[0].message
                 messages.append(msg)
                 if not msg.tool_calls:
-                    return {'ok': True, 'ktx_time': ktx, 'travel_date': date,
+                    return {'ok': True, 'train_time': ktx, 'travel_date': date,
                             'info': info, 'message': msg.content, 'trace': self.trace}
                 for tc in msg.tool_calls:
                     args = json.loads(tc.function.arguments or '{}')
@@ -86,7 +86,7 @@ class Orchestrator:
         rec = recommend(self.store, name, direction, ktx, date, self.fare,
                         do_book=(intent == 'reserve'))
         new = run_notification_check(self.store, fare=self.fare, pusher=self.pusher)
-        return {'ok': True, 'ktx_time': ktx, 'travel_date': date, 'info': info,
+        return {'ok': True, 'train_time': ktx, 'travel_date': date, 'info': info,
                 'message': rec['message'], 'new_alerts': [n['message'] for n in new],
                 'trace': ['fallback:recommend', 'fallback:detect_and_notify'], **rec}
 
@@ -121,9 +121,9 @@ TOOLS_SCHEMA = [
         'parameters': {'type': 'object', 'properties': {
             'name': {'type': 'string'},
             'direction': {'type': 'string', 'enum': ['to_station', 'to_campus']},
-            'ktx_time': {'type': 'string'}, 'travel_date': {'type': 'string'},
+            'train_time': {'type': 'string'}, 'travel_date': {'type': 'string'},
             'allow_booking': {'type': 'boolean'}},
-            'required': ['name', 'direction', 'ktx_time', 'travel_date']}}},
+            'required': ['name', 'direction', 'train_time', 'travel_date']}}},
     {'type': 'function', 'function': {
         'name': 'detect_and_notify',
         'description': '예약 상태 기반 알림을 감지하고 발송. 인자 없음.',

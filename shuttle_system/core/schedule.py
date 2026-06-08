@@ -55,7 +55,7 @@ def _to_min(hhmm):
     return int(h) * 60 + int(m)
 
 
-def grid_shuttle_time_for(direction, ktx_time):
+def grid_shuttle_time_for(direction, train_time):
     """학생이 입력한 KTX 시각 → 그 방향 그리드에서 가장 적합한 셔틀 시각.
 
     to_station: KTX 출발 25~60분 전 그리드 슬롯 (없으면 가장 가까운 -25분 이상)
@@ -63,7 +63,7 @@ def grid_shuttle_time_for(direction, ktx_time):
     매칭 가능한 그리드가 없으면 None.
     """
     gmin = GRID_MIN[direction]
-    ktx_m = _to_min(ktx_time)
+    ktx_m = _to_min(train_time)
     # 후보: 06~23시의 :gmin 그리드
     best = None
     for h in range(5, 24):
@@ -98,7 +98,7 @@ def find_shuttle_slot(direction, key, weekday, reservations=0, fare=POLICY_FARE)
         if e['wd'] == weekday and e['shuttle'] == key:
             return {'available': True, 'service': 'fixed', 'mode': 'shuttle',
                     'weekday': wd_kr, 'slot': e['slot'], 'shuttle_time': e['shuttle'],
-                    'ktx_time': key, 'note': '고정 운행 확정편'}
+                    'train_time': key, 'note': '고정 운행 확정편'}
 
     # 2) 그리드 (조건부)
     try:
@@ -108,7 +108,7 @@ def find_shuttle_slot(direction, key, weekday, reservations=0, fare=POLICY_FARE)
             ok = reservations >= n_star
             return {'available': ok, 'service': 'conditional', 'mode': 'shuttle',
                     'weekday': wd_kr, 'slot': f'{wd_kr} {key}',
-                    'shuttle_time': key, 'ktx_time': key,
+                    'shuttle_time': key, 'train_time': key,
                     'reservations': reservations, 'required': n_star,
                     'note': (f'조건부 — 예약 {reservations}명 ≥ N*({n_star}) → 배차 확정'
                              if ok else
@@ -137,7 +137,7 @@ def find_shuttle_near(direction, desired_time, weekday, window_min=60, fare=POLI
         diff = abs(_to_min(e['shuttle']) - target)
         if diff <= window_min and (best is None or diff < best['diff_min']):
             best = {'found': True, 'service': 'fixed', 'slot': e['slot'],
-                    'shuttle_time': e['shuttle'], 'ktx_time': e['shuttle'], 'diff_min': diff}
+                    'shuttle_time': e['shuttle'], 'train_time': e['shuttle'], 'diff_min': diff}
 
     # 2) 조건부 그리드 (모든 :gmin 시각, 5~23시)
     gmin = GRID_MIN.get(direction, 10)
@@ -147,32 +147,43 @@ def find_shuttle_near(direction, desired_time, weekday, window_min=60, fare=POLI
         if diff <= window_min and (best is None or diff < best['diff_min']):
             hhmm = f'{h:02d}:{gmin:02d}'
             best = {'found': True, 'service': 'conditional', 'slot': f'{wd_kr} {hhmm}',
-                    'shuttle_time': hhmm, 'ktx_time': hhmm, 'diff_min': diff}
+                    'shuttle_time': hhmm, 'train_time': hhmm, 'diff_min': diff}
 
     if best is None:
         return {'found': False, 'note': f'출발 희망 {desired_time} 근방 {window_min}분 내 셔틀 없음'}
     return best
 
 
+GRID_HOURS = {
+    'to_station': list(range(8, 23)),   # 08:10 ~ 22:10
+    'to_campus': list(range(8, 24)),    # 08:30 ~ 23:30
+}
+
+
 def grid_options(direction):
-    """방향별 그리드 시각 리스트(05:10~23:10 또는 05:30~23:30)."""
+    """방향별 운영 그리드 시각 리스트."""
     gmin = GRID_MIN.get(direction, 10)
-    return [f'{h:02d}:{gmin:02d}' for h in range(5, 24)]
+    return [f'{h:02d}:{gmin:02d}' for h in GRID_HOURS.get(direction, range(8, 23))]
 
 
 TURNAROUND_MIN = 50    # 한 운행 점유(왕복 40 + 정비/대기). 다음 운행은 이만큼 떨어져야
 MAX_RUNS_PER_DAY = 6   # 기사 근로시간 상 하루 최대 운행 횟수
 CUTOFF_HOURS = 2       # 출발 N시간 전 = 마감 시각 (잠정 → 확정/미운행 결정)
-VEHICLE_CAPACITY = 25  # 셔틀 1대 정원
+VEHICLE_CAPACITY = 12  # 셔틀 1대 정원
 
 
 def slot_phase(shuttle_time_hhmm, travel_date, now=None):
     """슬롯의 현 시점 단계: 'open' | 'closing_soon' | 'closed'.
 
     open: 마감 전(모집 중). closing_soon: 30분 이내 마감 임박. closed: 마감 지남.
+
+    셔틀 시각은 KST 기준이므로 서버 timezone과 무관하게 항상 KST 현재시각으로 비교한다.
+    (HF Spaces는 UTC로 동작 → datetime.now() 그대로 쓰면 9시간 어긋남)
     """
-    from datetime import datetime, timedelta
-    now = now or datetime.now()
+    from datetime import datetime, timedelta, timezone
+    if now is None:
+        kst = timezone(timedelta(hours=9))
+        now = datetime.now(kst).replace(tzinfo=None)   # naive KST
     try:
         depart = datetime.strptime(f'{travel_date} {shuttle_time_hhmm}', '%Y-%m-%d %H:%M')
     except ValueError:
@@ -213,7 +224,7 @@ def daily_dispatch(store, date, fare=POLICY_FARE,
     counts = {}
     for r in store.all_records():
         if str(r.get('travel_date')) == date:
-            k = (str(r.get('direction')), str(r.get('ktx_time')))
+            k = (str(r.get('direction')), str(r.get('train_time')))
             counts[k] = counts.get(k, 0) + 1
     # 그리드 시각인 예약만 (셔틀 시각으로 키 통일)
     cands = [{'service': 'conditional', 'direction': d, 'slot': f'{k} 조건부',

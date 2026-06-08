@@ -26,7 +26,7 @@ def test_conditional_below_threshold_not_dispatched():
         s.add(f'U{i}', 'to_station', '14:10', '2026-06-04')
     rep = compute_operations_report(s, fare=2000)
     cond = [r for r in rep['slots']
-            if r['ktx'] == '14:10' and r['direction'] == 'to_station'][0]
+            if r['train_time'] == '14:10' and r['direction'] == 'to_station'][0]
     assert cond['service'] == 'conditional'
     assert cond['reservations'] == 3
     assert cond['dispatched'] is False   # 3 < N*(8)

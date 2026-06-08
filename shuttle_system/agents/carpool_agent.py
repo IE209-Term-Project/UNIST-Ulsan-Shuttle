@@ -45,14 +45,14 @@ def _plus(hhmm, minutes):
 def form_carpool_groups(store, now=None, finalize=False):
     """카풀 신청을 (방향·시각·날짜)별로 모아 4명씩 그룹 편성.
 
-    각 그룹: {direction, ktx_time, travel_date, members, size, place,
+    각 그룹: {direction, train_time, travel_date, members, size, place,
              meet_from, meet_to, fare, per_person, status, group_no}
     status: 'collecting' | 'confirmed' | 'no_carpool'
     """
     now = now or datetime.now()
     buckets = defaultdict(list)
     for r in store.all_carpool_requests():
-        key = (str(r.get('direction')), str(r.get('ktx_time')), str(r.get('travel_date')))
+        key = (str(r.get('direction')), str(r.get('train_time')), str(r.get('travel_date')))
         buckets[key].append((str(r.get('created_at', '')), str(r.get('name', ''))))
 
     groups = []
@@ -77,7 +77,7 @@ def form_carpool_groups(store, now=None, finalize=False):
             else:
                 status = 'collecting'
             groups.append({
-                'direction': direction, 'ktx_time': ktx, 'travel_date': date,
+                'direction': direction, 'train_time': ktx, 'travel_date': date,
                 'members': chunk, 'size': size, 'place': place,
                 'meet_from': ktx, 'meet_to': _plus(ktx, WINDOW_MIN),
                 'fare': fare, 'per_person': round(fare / size),
@@ -100,7 +100,7 @@ def _fmt_date(date):
 def group_message(g):
     """그룹을 사람 말 알림으로(템플릿)."""
     d = '울산역행' if g['direction'] == 'to_station' else '캠퍼스행'
-    when = f"{_fmt_date(g['travel_date'])} {g['ktx_time']}"
+    when = f"{_fmt_date(g['travel_date'])} {g['train_time']}"
     members = ', '.join(g['members'])
     if g['status'] == 'no_carpool':
         return (f"🚕 [카풀 미성사] {when} {d}: 현재 신청자 1명뿐이라 카풀이 성사되지 않았어요. "

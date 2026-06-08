@@ -13,15 +13,15 @@ def _parse_hhmm(value, base):
     return base.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
 
 
-def evaluate_connection(direction, bus_arrival_min, ktx_time,
+def evaluate_connection(direction, bus_arrival_min, train_time,
                         walk_to_stop_min=5, now=None):
     """KTX 시각과 실시간 513 도착을 대조해 연계 가능 여부를 결정론적으로 계산."""
     now = now or datetime.now()
     facts = {'direction': direction, 'now': now.strftime('%H:%M'),
-             'bus_arrival_min': bus_arrival_min, 'ktx_time': ktx_time}
+             'bus_arrival_min': bus_arrival_min, 'train_time': train_time}
 
     if direction == 'to_station':
-        ktx_dep = _parse_hhmm(ktx_time, now)
+        ktx_dep = _parse_hhmm(train_time, now)
         if bus_arrival_min < walk_to_stop_min:
             facts.update(status='BUS_TOO_SOON',
                          reason=f'정류장까지 도보 {walk_to_stop_min}분인데 버스가 '
@@ -46,7 +46,7 @@ def evaluate_connection(direction, bus_arrival_min, ktx_time,
         return facts
 
     # to_campus
-    ktx_arr = _parse_hhmm(ktx_time, now)
+    ktx_arr = _parse_hhmm(train_time, now)
     ready = ktx_arr + timedelta(minutes=STATION_EXIT_MIN)
     depart = now + timedelta(minutes=bus_arrival_min)
     wait = round((depart - ready).total_seconds() / 60)

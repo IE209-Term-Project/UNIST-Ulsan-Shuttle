@@ -20,7 +20,8 @@ from datetime import datetime, date as _date, timedelta
 from shuttle_system.storage import make_store
 from shuttle_system.core.optimization import breakeven_N
 from shuttle_system.agents.report_agent import (
-    compute_operations_report, narrate_report, build_weekly_xlsx)
+    compute_operations_report, narrate_report, build_weekly_xlsx,
+    week_label_kr, weekly_filename_kr)
 
 st.set_page_config(page_title='UNIST–울산역 수요반응형 셔틀 운영 리포트',
                    layout='wide')
@@ -75,43 +76,64 @@ def _weekly_xlsx_bytes(mon_iso, sun_iso, fare):
 
 with st.sidebar:
     st.markdown('---')
-    with st.expander('📑 보고서 (주간 .xlsx)', expanded=True):
-        st.caption('매주 월요일 00시가 지나면 직전 주(월~일) 보고서가 자동으로 추가됩니다.')
-        try:
-            recs = store.all_records()
-        except Exception as e:
-            recs = []; st.caption(f'⚠ 시트 읽기 실패: {e}')
-        weeks = _completed_weeks(recs)
-        if not weeks:
-            st.caption('완료된 주차 없음 — 이번 주가 끝나야 첫 보고서가 생성됩니다.')
-        else:
-            st.caption(f'총 {len(weeks)}개 주차')
-            for mon, sun in weeks:
-                label = f"{mon.strftime('%Y-%m-%d')} ~ {sun.strftime('%m-%d')} (월~일)"
-                try:
-                    data = _weekly_xlsx_bytes(mon.isoformat(), sun.isoformat(), fare)
-                    st.download_button(
-                        f'⬇ {label}', data=data,
-                        file_name=f'shuttle_weekly_{mon.isoformat()}_{sun.isoformat()}.xlsx',
-                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                        key=f'rep_{mon.isoformat()}')
-                except Exception as e:
-                    st.caption(f'⚠ {label}: {e}')
+    st.markdown('### 📑 보고서')
+    st.caption('월별 폴더에 주차별 .xlsx 보고서가 정리됩니다. '
+               '매주 월요일 00시가 지나면 직전 주가 자동으로 추가됩니다.')
+    try:
+        recs = store.all_records()
+    except Exception as e:
+        recs = []; st.caption(f'⚠ 시트 읽기 실패: {e}')
+    weeks = _completed_weeks(recs)
 
-        # 진행 중 주차 (월~일이 아직 안 끝남) — 미리보기
-        today_d = _date.today()
-        cur_mon = today_d - timedelta(days=today_d.weekday())
-        cur_sun = cur_mon + timedelta(days=6)
-        st.caption(f"진행 중: {cur_mon} ~ {cur_sun} (일요일 이후 자동 추가)")
-        try:
-            data = _weekly_xlsx_bytes(cur_mon.isoformat(), cur_sun.isoformat(), fare)
-            st.download_button(
-                f'⬇ 진행 중 주차 (미리보기)', data=data,
-                file_name=f'shuttle_weekly_PREVIEW_{cur_mon.isoformat()}.xlsx',
-                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                key='rep_preview')
-        except Exception:
-            pass
+    # 월별 그룹화 (월요일 기준 월)
+    from collections import OrderedDict
+    monthly = OrderedDict()
+    for mon, sun in weeks:
+        key = (mon.year, mon.month)
+        monthly.setdefault(key, []).append((mon, sun))
+
+    if not monthly:
+        st.caption('_완료된 주차 없음 — 이번 주가 끝나야 첫 보고서가 생성됩니다._')
+    else:
+        for (year, month), wks in monthly.items():
+            with st.expander(f'📁 {year}년 {month:02d}월  ({len(wks)}개 주차)',
+                             expanded=(year, month) == next(iter(monthly))):
+                for mon, sun in wks:
+                    label = week_label_kr(mon)
+                    period = f"{mon.strftime('%m/%d')}~{sun.strftime('%m/%d')}"
+                    try:
+                        data = _weekly_xlsx_bytes(mon.isoformat(),
+                                                  sun.isoformat(), fare)
+                        st.download_button(
+                            f'📄 {label}  ({period})',
+                            data=data,
+                            file_name=weekly_filename_kr(mon),
+                            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                            key=f'rep_{mon.isoformat()}',
+                            use_container_width=True)
+                    except Exception as e:
+                        st.caption(f'⚠ {label}: {e}')
+
+    # ── 진행 중 주차 (별도 섹션) ──
+    st.markdown('---')
+    today_d = _date.today()
+    cur_mon = today_d - timedelta(days=today_d.weekday())
+    cur_sun = cur_mon + timedelta(days=6)
+    cur_label = week_label_kr(cur_mon)
+    st.caption(f'📅 진행 중: {cur_label} ({cur_mon.strftime("%m/%d")}~{cur_sun.strftime("%m/%d")}) — '
+               '일요일 이후 위 폴더에 자동 추가됨')
+    try:
+        data = _weekly_xlsx_bytes(cur_mon.isoformat(),
+                                  cur_sun.isoformat(), fare)
+        st.download_button(
+            f'📄 미리보기 다운로드',
+            data=data,
+            file_name=f'(미리보기) {weekly_filename_kr(cur_mon)}',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            key='rep_preview',
+            use_container_width=True)
+    except Exception:
+        pass
 
 
 @st.cache_data(ttl=30)
