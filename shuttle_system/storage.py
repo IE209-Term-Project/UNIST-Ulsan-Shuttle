@@ -24,6 +24,11 @@ NOTIF_SHEET = 'notifications'
 CARPOOL_HEADER = ['created_at', 'name', 'direction', 'train_time', 'travel_date']
 CARPOOL_SHEET = 'carpool'
 
+# Promotion Agent용 — SHUTTLE_FIXED를 시트에서 동적으로 읽기 위한 워크시트.
+SCHEDULE_OVERRIDES_SHEET = 'schedule_overrides'
+SCHEDULE_OVERRIDES_HEADER = ['effective_from', 'direction', 'weekday',
+                             'shuttle_time', 'slot_label', 'demand']
+
 # Google Sheets API 권한 범위 (시트 읽기/쓰기 + 이름으로 열기)
 GSPREAD_SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
@@ -43,6 +48,14 @@ class MemoryReservationStore:
         self._rows = []
         self._notifs = []
         self._carpool = []
+        self._overrides = []   # schedule_overrides (Promotion Agent 결정 이력)
+
+    def get_schedule_overrides(self):
+        return list(self._overrides)
+
+    def add_schedule_overrides_rows(self, rows):
+        for r in rows:
+            self._overrides.append(dict(r))
 
     def add_notification(self, rec):
         r = {'created_at': datetime.now().isoformat(timespec='seconds'), **rec}
@@ -147,6 +160,30 @@ class _SheetsStoreBase:
     def all_carpool_requests(self):
         return self.carpool_ws.get_all_records()
 
+    def _ensure_overrides_ws(self, sh):
+        """schedule_overrides 워크시트 확보(없으면 생성)."""
+        import gspread
+        try:
+            self.overrides_ws = sh.worksheet(SCHEDULE_OVERRIDES_SHEET)
+        except gspread.WorksheetNotFound:
+            self.overrides_ws = sh.add_worksheet(
+                SCHEDULE_OVERRIDES_SHEET, rows=500,
+                cols=len(SCHEDULE_OVERRIDES_HEADER))
+        vals = self.overrides_ws.get_all_values()
+        if not vals or vals[0] != SCHEDULE_OVERRIDES_HEADER:
+            self.overrides_ws.clear()
+            self.overrides_ws.append_row(SCHEDULE_OVERRIDES_HEADER,
+                                          value_input_option='RAW')
+
+    def get_schedule_overrides(self):
+        return self.overrides_ws.get_all_records()
+
+    def add_schedule_overrides_rows(self, rows):
+        payload = [[str(r.get(k, '')) for k in SCHEDULE_OVERRIDES_HEADER]
+                   for r in rows]
+        if payload:
+            self.overrides_ws.append_rows(payload, value_input_option='RAW')
+
     def add(self, name, direction, train_time, travel_date, email=''):
         self.ws.append_row([(name or '익명').strip(), (email or '').strip(),
                             direction, train_time, travel_date,
@@ -225,6 +262,7 @@ class SheetsReservationStore(_SheetsStoreBase):
         self._ensure_header()
         self._ensure_notif_ws(sh)
         self._ensure_carpool_ws(sh)
+        self._ensure_overrides_ws(sh)
 
 
 class ServiceAccountSheetsStore(_SheetsStoreBase):
@@ -270,6 +308,7 @@ class ServiceAccountSheetsStore(_SheetsStoreBase):
         self._ensure_header()
         self._ensure_notif_ws(sh)
         self._ensure_carpool_ws(sh)
+        self._ensure_overrides_ws(sh)
 
 
 def make_store():
