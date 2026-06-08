@@ -203,9 +203,13 @@ class _SheetsStoreBase:
                                           value_input_option='RAW')
 
     def get_schedule_overrides(self):
+        if not hasattr(self, 'overrides_ws'):
+            return []
         return self.overrides_ws.get_all_records()
 
     def add_schedule_overrides_rows(self, rows):
+        if not hasattr(self, 'overrides_ws'):
+            return
         payload = [[str(r.get(k, '')) for k in SCHEDULE_OVERRIDES_HEADER]
                    for r in rows]
         if payload:
@@ -227,9 +231,13 @@ class _SheetsStoreBase:
                                         value_input_option='RAW')
 
     def get_semester_archive(self):
+        if not hasattr(self, 'archive_ws'):
+            return []
         return self.archive_ws.get_all_records()
 
     def add_semester_archive_rows(self, rows):
+        if not hasattr(self, 'archive_ws'):
+            return
         payload = [[str(r.get(k, '')) for k in SEMESTER_ARCHIVE_HEADER]
                    for r in rows]
         if payload:
@@ -237,6 +245,8 @@ class _SheetsStoreBase:
 
     def clear_semester_archive(self, semester_ids=None):
         """전체 또는 특정 학기만 삭제 후 재적재. 시트는 header만 남기고 다시 씀."""
+        if not hasattr(self, 'archive_ws'):
+            return 0
         records = self.get_semester_archive()
         if semester_ids is None:
             kept = []
@@ -330,10 +340,16 @@ class SheetsReservationStore(_SheetsStoreBase):
         self.ws = sh.sheet1
         self.url = sh.url
         self._ensure_header()
-        self._ensure_notif_ws(sh)
-        self._ensure_carpool_ws(sh)
-        self._ensure_overrides_ws(sh)
-        self._ensure_archive_ws(sh)
+        # 부가 워크시트는 개별 실패가 앱 전체를 멈추지 않게 보호 (시트 권한·쿼터 이슈 대비).
+        # 실패 시 해당 기능만 비활성화되고 앱은 정상 부팅.
+        for _name, _fn in (('notif', self._ensure_notif_ws),
+                           ('carpool', self._ensure_carpool_ws),
+                           ('overrides', self._ensure_overrides_ws),
+                           ('archive', self._ensure_archive_ws)):
+            try:
+                _fn(sh)
+            except Exception as _e:
+                print(f'[storage] {_name} worksheet init skipped: {_e}')
 
 
 class ServiceAccountSheetsStore(_SheetsStoreBase):
@@ -377,10 +393,16 @@ class ServiceAccountSheetsStore(_SheetsStoreBase):
         self.ws = sh.sheet1
         self.url = sh.url
         self._ensure_header()
-        self._ensure_notif_ws(sh)
-        self._ensure_carpool_ws(sh)
-        self._ensure_overrides_ws(sh)
-        self._ensure_archive_ws(sh)
+        # 부가 워크시트는 개별 실패가 앱 전체를 멈추지 않게 보호 (시트 권한·쿼터 이슈 대비).
+        # 실패 시 해당 기능만 비활성화되고 앱은 정상 부팅.
+        for _name, _fn in (('notif', self._ensure_notif_ws),
+                           ('carpool', self._ensure_carpool_ws),
+                           ('overrides', self._ensure_overrides_ws),
+                           ('archive', self._ensure_archive_ws)):
+            try:
+                _fn(sh)
+            except Exception as _e:
+                print(f'[storage] {_name} worksheet init skipped: {_e}')
 
 
 def make_store():
