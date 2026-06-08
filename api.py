@@ -317,6 +317,15 @@ def api_promotion_run():
         'applied': apply_res is not None,
         'effective_from': apply_res.get('effective_from') if apply_res else None,
         'mail_sent': bool(mail.get('sent')),
+        # 디버깅용 — 발송 실패 시 원인 노출
+        'mail_debug': {
+            'admin_email_set': bool(admin_email),
+            'gmail_user_set': bool(os.environ.get('GMAIL_USER')),
+            'gmail_pw_set': bool(os.environ.get('GMAIL_APP_PASSWORD')),
+            'resend_key_set': bool(os.environ.get('RESEND_API_KEY')),
+            'reason': mail.get('reason'),
+            'detail': mail,
+        },
     }
 
 
