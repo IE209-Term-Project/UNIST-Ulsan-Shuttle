@@ -11,7 +11,7 @@
   · 콜드 스타트: 학기 1~3주차는 평가 동결
 """
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from shuttle_system.core.optimization import POLICY_FARE, breakeven_N
 from shuttle_system.core.schedule import GRID_MIN, SHUTTLE_FIXED, WEEKDAY_KR
@@ -22,6 +22,13 @@ DEMOTE_AVG_MAX = 4          # 평균 < 4 → 강등 조건 1
 DEMOTE_RATE_MAX = 0.25      # 운행률 ≤ 0.25 → 강등 조건 2
 PROMOTE_RATE_MIN = 0.75     # 운행률 ≥ 0.75 → 승격 조건 2
 COLD_START_WEEKS = 3        # 1~3주차 동결, 4주차부터 평가
+
+# HF Spaces가 UTC라 datetime.now() 그대로 쓰면 KST와 9시간 어긋남.
+_KST = timezone(timedelta(hours=9))
+
+
+def _kst_now_str():
+    return datetime.now(_KST).strftime('%Y-%m-%d %H:%M KST')
 
 
 def evaluate_promotions(store, today=None, fare=POLICY_FARE,
@@ -51,7 +58,7 @@ def evaluate_promotions(store, today=None, fare=POLICY_FARE,
     window_start_d = today_d - timedelta(days=WINDOW_WEEKS * 7)
 
     base = {
-        'evaluated_at': datetime.now().isoformat(timespec='seconds'),
+        'evaluated_at': _kst_now_str(),
         'window_start': window_start_d.strftime('%Y-%m-%d'),
         'window_end': window_end_d.strftime('%Y-%m-%d'),
         'frozen': False,
