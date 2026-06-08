@@ -89,3 +89,4 @@ def semester_of(date_str):
         return _vacation_response(d, year, 2)
     # 2학기 끝 이후 = 다음 해 1학기로 가는 겨울방학
     return _vacation_response(d, year + 1, 1)
+

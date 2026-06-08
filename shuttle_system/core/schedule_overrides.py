@@ -107,3 +107,4 @@ def refresh_active_schedule(store, today=None, ttl_seconds=TTL_SECONDS):
 
 def invalidate_cache():
     _CACHE.clear()
+

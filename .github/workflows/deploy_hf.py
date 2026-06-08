@@ -29,7 +29,26 @@ ADMIN = 'jaeeewons/unist-shuttle-admin'
 
 
 def changed_files() -> list[str]:
-    """직전 커밋과의 diff. PR/일반 push 모두 커버 — 안되면 전체로 fallback."""
+    """푸시된 모든 커밋의 diff. 환경변수 FORCE_FULL_SYNC=1이면 전체 파일.
+
+    GitHub Actions의 push 이벤트는 GITHUB_EVENT_BEFORE에 직전 SHA를 제공.
+    HEAD~1만 보면 다중 커밋 push에서 첫 커밋의 파일이 누락될 수 있다.
+    """
+    if os.environ.get('FORCE_FULL_SYNC') == '1':
+        print('FORCE_FULL_SYNC=1 — 전체 파일 sync')
+        out = subprocess.check_output(['git', 'ls-files'], text=True)
+        return [f.strip() for f in out.splitlines() if f.strip()]
+
+    before = os.environ.get('GITHUB_EVENT_BEFORE', '').strip()
+    if before and not before.startswith('0' * 10):
+        try:
+            out = subprocess.check_output(
+                ['git', 'diff', '--name-only', before, 'HEAD'], text=True)
+            files = [f.strip() for f in out.splitlines() if f.strip()]
+            if files:
+                return files
+        except subprocess.CalledProcessError:
+            pass
     try:
         out = subprocess.check_output(
             ['git', 'diff', '--name-only', 'HEAD~1', 'HEAD'], text=True)
@@ -38,9 +57,7 @@ def changed_files() -> list[str]:
             return files
     except subprocess.CalledProcessError:
         pass
-    # fallback — 전체 파일
-    out = subprocess.check_output(
-        ['git', 'ls-files'], text=True)
+    out = subprocess.check_output(['git', 'ls-files'], text=True)
     return [f.strip() for f in out.splitlines() if f.strip()]
 
 

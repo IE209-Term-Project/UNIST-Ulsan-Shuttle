@@ -18,7 +18,12 @@ on:
       - 'legacy/app_admin_streamlit.py'
       - 'requirements.txt'
       - '.github/workflows/deploy-hf.yml'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force_full_sync:
+        description: '모든 관련 파일 전체 재업로드'
+        type: boolean
+        default: false
 
 jobs:
   deploy:
@@ -37,4 +42,6 @@ jobs:
       - name: Deploy to both Spaces
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+          FORCE_FULL_SYNC: ${{ inputs.force_full_sync && '1' || '' }}
         run: python .github/workflows/deploy_hf.py

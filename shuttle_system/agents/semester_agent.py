@@ -183,3 +183,4 @@ def generate_next_baseline(store, target_semester_id, n_star=None,
             'weights': [weight_by_sid[sid] for sid in available],
         },
     }
+

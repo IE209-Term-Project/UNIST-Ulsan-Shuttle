@@ -280,3 +280,4 @@ def rollback_to_previous(store, effective_from, today=None):
         'restored_from': prev_eff,
         'new_baseline': table,
     }
+

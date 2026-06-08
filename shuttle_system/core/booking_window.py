@@ -32,3 +32,4 @@ def is_within_booking_window(travel_date, today=None):
         return False
     nm = datetime.strptime(next_monday_midnight(today), '%Y-%m-%d').date()
     return td <= tv < nm
+
