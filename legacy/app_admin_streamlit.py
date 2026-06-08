@@ -214,7 +214,7 @@ with st.sidebar.expander('🎓 학기 baseline 관리', expanded=False):
             st.session_state['sa_result'] = run_res
 
     # 미리보기 전용: 적용 안 함 — 학기 중 아무 때나 가능
-    if st.button('🔍 다음 학기 baseline 미리보기', key='sa_preview',
+    if st.button('🔍 다음 학기 baseline 미리보기', key='sa_preview_btn',
                  use_container_width=True):
         from datetime import datetime as _dt
         from shuttle_system.agents.semester_agent import generate_next_baseline
@@ -237,7 +237,7 @@ with st.sidebar.expander('🎓 학기 baseline 관리', expanded=False):
         gen = generate_next_baseline(
             store, target_semester_id=target_id, fare=fare,
             fallback_table=fb)
-        st.session_state['sa_preview'] = {
+        st.session_state['sa_preview_data'] = {
             'target_semester': target_id,
             'current_semester': info,
             'used_fallback': gen['used_fallback'],
@@ -248,7 +248,7 @@ with st.sidebar.expander('🎓 학기 baseline 관리', expanded=False):
 
     # 결과 표시
     res = st.session_state.get('sa_result')
-    prev = st.session_state.get('sa_preview')
+    prev = st.session_state.get('sa_preview_data')
     show = res or prev
     if show:
         if show.get('frozen'):
