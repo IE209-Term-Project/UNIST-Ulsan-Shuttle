@@ -29,6 +29,12 @@ SCHEDULE_OVERRIDES_SHEET = 'schedule_overrides'
 SCHEDULE_OVERRIDES_HEADER = ['effective_from', 'direction', 'weekday',
                              'shuttle_time', 'slot_label', 'demand']
 
+# 장기 Semester Agent용 — 학기별 슬롯 집계 누적 보관.
+SEMESTER_ARCHIVE_SHEET = 'semester_archive'
+SEMESTER_ARCHIVE_HEADER = ['semester_id', 'direction', 'weekday',
+                          'shuttle_time', 'slot_label',
+                          'avg_resv', 'dispatch_rate', 'recorded_at']
+
 # Google Sheets API 권한 범위 (시트 읽기/쓰기 + 이름으로 열기)
 GSPREAD_SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
@@ -49,6 +55,7 @@ class MemoryReservationStore:
         self._notifs = []
         self._carpool = []
         self._overrides = []   # schedule_overrides (Promotion Agent 결정 이력)
+        self._archive = []     # semester_archive (장기 Semester Agent 적재 데이터)
 
     def get_schedule_overrides(self):
         return list(self._overrides)
@@ -56,6 +63,13 @@ class MemoryReservationStore:
     def add_schedule_overrides_rows(self, rows):
         for r in rows:
             self._overrides.append(dict(r))
+
+    def get_semester_archive(self):
+        return list(self._archive)
+
+    def add_semester_archive_rows(self, rows):
+        for r in rows:
+            self._archive.append(dict(r))
 
     def add_notification(self, rec):
         r = {'created_at': datetime.now().isoformat(timespec='seconds'), **rec}
@@ -184,6 +198,30 @@ class _SheetsStoreBase:
         if payload:
             self.overrides_ws.append_rows(payload, value_input_option='RAW')
 
+    def _ensure_archive_ws(self, sh):
+        """semester_archive 워크시트 확보."""
+        import gspread
+        try:
+            self.archive_ws = sh.worksheet(SEMESTER_ARCHIVE_SHEET)
+        except gspread.WorksheetNotFound:
+            self.archive_ws = sh.add_worksheet(
+                SEMESTER_ARCHIVE_SHEET, rows=1000,
+                cols=len(SEMESTER_ARCHIVE_HEADER))
+        vals = self.archive_ws.get_all_values()
+        if not vals or vals[0] != SEMESTER_ARCHIVE_HEADER:
+            self.archive_ws.clear()
+            self.archive_ws.append_row(SEMESTER_ARCHIVE_HEADER,
+                                        value_input_option='RAW')
+
+    def get_semester_archive(self):
+        return self.archive_ws.get_all_records()
+
+    def add_semester_archive_rows(self, rows):
+        payload = [[str(r.get(k, '')) for k in SEMESTER_ARCHIVE_HEADER]
+                   for r in rows]
+        if payload:
+            self.archive_ws.append_rows(payload, value_input_option='RAW')
+
     def add(self, name, direction, train_time, travel_date, email=''):
         self.ws.append_row([(name or '익명').strip(), (email or '').strip(),
                             direction, train_time, travel_date,
@@ -263,6 +301,7 @@ class SheetsReservationStore(_SheetsStoreBase):
         self._ensure_notif_ws(sh)
         self._ensure_carpool_ws(sh)
         self._ensure_overrides_ws(sh)
+        self._ensure_archive_ws(sh)
 
 
 class ServiceAccountSheetsStore(_SheetsStoreBase):
@@ -309,6 +348,7 @@ class ServiceAccountSheetsStore(_SheetsStoreBase):
         self._ensure_notif_ws(sh)
         self._ensure_carpool_ws(sh)
         self._ensure_overrides_ws(sh)
+        self._ensure_archive_ws(sh)
 
 
 def make_store():

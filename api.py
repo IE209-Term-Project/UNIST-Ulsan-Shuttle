@@ -21,6 +21,7 @@ from shuttle_system.core.schedule_overrides import refresh_active_schedule
 from shuttle_system.core.booking_window import (
     is_within_booking_window, next_monday_midnight,
 )
+from shuttle_system.core.semester import semester_of
 from shuttle_system import timetable
 from shuttle_system.recommend import recommend, slot_status, resolve_ktx, weekday_of
 from shuttle_system.agents.data_agent import fetch_513_arrival
@@ -56,6 +57,30 @@ async def _refresh_schedule_overrides(request, call_next):
 
 def _today():
     return datetime.now().strftime('%Y-%m-%d')
+
+
+def _vacation_block(travel_date):
+    """방학 중이면 (True, info_dict), 아니면 (False, None).
+
+    학생 API(/api/reserve, /api/carpool/signup 등)에서 방학 예약을 차단할 때 사용.
+    """
+    info = semester_of(travel_date)
+    if not info['is_vacation']:
+        return False, None
+    return True, {
+        'is_vacation': True,
+        'next_semester_id': info['next_semester_id'],
+        'next_semester_start': info['next_semester_start'],
+        'info': (f'방학 기간 — UNIST↔울산역 셔틀은 운영하지 않습니다. '
+                 f'다음 학기({info["next_semester_id"]}) 개강일 '
+                 f'{info["next_semester_start"]}부터 예약 가능합니다.'),
+    }
+
+
+@app.get('/api/semester_info')
+def api_semester_info():
+    """학생 앱이 현재 학기/방학 상태를 조회 (UI 배너용)."""
+    return {'ok': True, **semester_of(_today())}
 
 
 # ── 정적 페이지 ──────────────────────────────────────
@@ -121,8 +146,12 @@ class ReserveReq(StatusReq):
 @app.post('/api/reserve')
 def api_reserve(req: ReserveReq):
     date = (req.travel_date or '').strip() or _today()
-    # 0) 예약 윈도우 검사 — 다음 월요일 00시 이후는 거부
-    #    (시간표 갱신 시점이라 예약을 받아두면 변경 영향에 노출됨)
+    # 0a) 방학 기간 차단 (학기 사이는 시스템 휴면)
+    is_vac, vac_info = _vacation_block(date)
+    if is_vac:
+        return JSONResponse({'ok': False, **vac_info}, status_code=400)
+    # 0b) 예약 윈도우 검사 — 다음 월요일 00시 이후는 거부
+    #     (시간표 갱신 시점이라 예약을 받아두면 변경 영향에 노출됨)
     if not is_within_booking_window(date):
         nm = next_monday_midnight()
         return JSONResponse(
@@ -233,6 +262,9 @@ def api_cancel(req: CancelReq):
 @app.post('/api/carpool/signup')
 def api_carpool_signup(req: CarpoolReq):
     date = (req.travel_date or '').strip() or _today()
+    is_vac, vac_info = _vacation_block(date)
+    if is_vac:
+        return JSONResponse({'ok': False, **vac_info}, status_code=400)
     if not is_within_booking_window(date):
         nm = next_monday_midnight()
         return JSONResponse(
@@ -334,6 +366,71 @@ def api_promotion_rollback():
     """관리자 대시보드의 ↩ 롤백 버튼이 호출 (직전 baseline으로 복귀)."""
     from shuttle_system.agents.promotion_agent import rollback_to_previous
     return rollback_to_previous(store, effective_from=next_monday_midnight())
+
+
+# ── 장기 Semester Agent — 학기 전환 (archive + baseline) ──────
+@app.post('/api/semester/run')
+def api_semester_run():
+    """학기 전환 자동 작업:
+
+    1) 직전에 종료된 학기를 semester_archive에 적재
+    2) 다가오는 학기의 baseline을 동일학기 지수가중평균으로 도출
+       (archive 없으면 하드코딩 SHUTTLE_FIXED 사용)
+    3) 새 baseline을 schedule_overrides에 효력일=다가오는 학기 1주차 월요일로 적재
+
+    매주 월요일 cron에서 호출 — 1주차 월요일일 때만 실제 작업.
+    학기 중·방학 중 호출 시 frozen 응답.
+    """
+    from shuttle_system.agents.semester_agent import (
+        archive_semester, generate_next_baseline,
+    )
+    from shuttle_system.core.schedule_overrides import save_new_baseline
+    from shuttle_system.core.schedule import SHUTTLE_FIXED
+
+    today_iso = _today()
+    info = semester_of(today_iso)
+
+    # 학기 1주차 월요일에만 작동. 그 외엔 frozen 응답.
+    if info['is_vacation'] or info['week'] != 1:
+        return {
+            'ok': True, 'frozen': True,
+            'reason': ('방학 중' if info['is_vacation']
+                       else f'학기 {info["week"]}주차 — 1주차에만 전환'),
+            'semester': info,
+        }
+
+    # 1) 직전 학기 결정 + archive 적재
+    t_year, t_term = info['semester_id'].split('-')
+    t_year, t_term = int(t_year), int(t_term)
+    if t_term == 1:
+        prev_id = f'{t_year - 1}-2'
+    else:
+        prev_id = f'{t_year}-1'
+    archived_rows = archive_semester(store, prev_id, fare=FARE)
+
+    # 2) 다가오는 학기 baseline 생성
+    fallback = {
+        'to_station': [dict(e) for e in SHUTTLE_FIXED['to_station']],
+        'to_campus': [dict(e) for e in SHUTTLE_FIXED['to_campus']],
+    }
+    gen = generate_next_baseline(
+        store, target_semester_id=info['semester_id'],
+        fare=FARE, fallback_table=fallback)
+
+    # 3) baseline을 학기 1주차 시작일자로 적재
+    save_new_baseline(store, gen['baseline'], effective_from=today_iso)
+
+    return {
+        'ok': True, 'frozen': False,
+        'archived_semester': prev_id,
+        'archived_slot_count': len(archived_rows),
+        'new_semester': info['semester_id'],
+        'effective_from': today_iso,
+        'used_fallback': gen['used_fallback'],
+        'baseline_slot_count': (len(gen['baseline'].get('to_station', []))
+                                + len(gen['baseline'].get('to_campus', []))),
+        'weight_info': gen['weight_info'],
+    }
 
 
 def _mask_name(nm):

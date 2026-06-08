@@ -49,6 +49,11 @@
 
   <!-- Reserve card -->
   <section id="reserve" class="bg-white rounded-3xl p-7 card mb-8">
+    <!-- 방학 안내 배너 (학기 사이 자동 표시) -->
+    <div id="vacationBanner" class="hidden mb-5 p-4 rounded-2xl bg-gray-900 text-white text-sm leading-relaxed">
+      <strong>🛏️ 방학 기간 — 셔틀 운영 안 함</strong><br>
+      <span id="vacationDetail">다음 학기 개강일부터 예약 가능합니다.</span>
+    </div>
     <div class="mb-5 p-3 rounded-2xl bg-amber-50 text-amber-900 text-xs leading-relaxed">
       <strong>📅 예약 가능 기간 안내</strong><br>
       셔틀 시간표는 <b>매주 월요일 00시</b>에 수요 데이터로 갱신됩니다.
@@ -179,6 +184,18 @@ function _bookingWindow() {
   return { min: iso(today), max: iso(sun) };
 }
 
+async function checkVacation() {
+  try {
+    const r = await fetch('/api/semester_info');
+    const d = await r.json();
+    if (d.is_vacation) {
+      $('vacationBanner').classList.remove('hidden');
+      $('vacationDetail').textContent =
+        `다음 학기(${d.next_semester_id}) 개강일 ${d.next_semester_start}부터 예약 가능합니다.`;
+    }
+  } catch (e) { /* 조용히 무시 */ }
+}
+
 async function init() {
   const win = _bookingWindow();
   const dateInput = $('date');
@@ -188,6 +205,7 @@ async function init() {
   // 이름/이메일은 새로고침 시 매번 비운다 (이전에 입력한 정보가 남으면 안 됨)
   $('name').value = '';
   $('email').value = '';
+  checkVacation();
   localStorage.removeItem('shuttle_name');
   localStorage.removeItem('shuttle_email');
   GRID = await (await fetch('/api/grid')).json();

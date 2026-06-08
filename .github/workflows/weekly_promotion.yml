@@ -22,13 +22,20 @@ jobs:
             echo "ERROR: SHUTTLE_API_URL secret not set"
             exit 1
           fi
-          echo "Triggering Promotion Agent at $API_URL"
+          echo "[Promotion Agent] $API_URL"
           response=$(curl -s -w "\n%{http_code}" -X POST "$API_URL/api/promotion/run")
           status=$(echo "$response" | tail -n1)
           body=$(echo "$response" | sed '$d')
           echo "Response: $body"
-          echo "Status: $status"
-          if [ "$status" -ne 200 ]; then
-            echo "ERROR: non-200 response"
-            exit 1
-          fi
+          [ "$status" -eq 200 ] || { echo "ERROR: status $status"; exit 1; }
+
+      - name: Trigger /api/semester/run on HF Space (학기 1주차일 때만 실작동)
+        env:
+          API_URL: ${{ secrets.SHUTTLE_API_URL }}
+        run: |
+          echo "[Semester Agent] $API_URL"
+          response=$(curl -s -w "\n%{http_code}" -X POST "$API_URL/api/semester/run")
+          status=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Response: $body"
+          [ "$status" -eq 200 ] || { echo "ERROR: status $status"; exit 1; }
