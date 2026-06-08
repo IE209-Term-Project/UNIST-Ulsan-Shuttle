@@ -134,6 +134,167 @@ with st.sidebar.expander('📋 슬롯 등급 관리', expanded=False):
         st.session_state['pa_rb_confirm'] = False
 
 
+# ── 사이드바: 🎓 학기 baseline 관리 (Semester Agent) ─────
+WD_KR = '월화수목금토일'
+DIR_KR = {'to_station': '울산역행', 'to_campus': '캠퍼스행'}
+
+
+def _render_baseline(baseline):
+    """baseline dict를 markdown 리스트로."""
+    for direction, label in [('to_station', '울산역행'),
+                             ('to_campus', '캠퍼스행')]:
+        entries = baseline.get(direction, [])
+        st.markdown(f'**[{label}] 고정 슬롯 {len(entries)}개**')
+        if not entries:
+            st.caption('— 없음')
+            continue
+        for e in sorted(entries, key=lambda x: (x.get('wd', 0),
+                                                x.get('shuttle', ''))):
+            wd = e.get('wd', 0)
+            st.markdown(
+                f"- `{WD_KR[wd]}요일 {e.get('shuttle', '?')}`  "
+                f"· 예상 수요 **{e.get('demand', 0)}명**")
+
+
+with st.sidebar.expander('🎓 학기 baseline 관리', expanded=False):
+    st.caption(
+        '장기 Semester Agent — 매 학기 1주차 월요일 00시(KST) **자동 평가+적용**. '
+        '동일 학기명(예: 26-1 ← 25-1/24-1/23-1) archive를 지수가중평균(0.5/0.3/0.2)해 '
+        '새 fixed baseline 도출. 아래는 수동 인터페이스.')
+
+    # 메인: 학기 전환 실행 (cron과 동일 동작, 학기 1주차 아니면 frozen)
+    if st.button('⚡ 학기 전환 실행', key='sa_run',
+                 use_container_width=True, type='primary'):
+        from datetime import datetime as _dt
+        from shuttle_system.agents.semester_agent import (
+            archive_semester, generate_next_baseline,
+        )
+        from shuttle_system.core.schedule_overrides import save_new_baseline
+        from shuttle_system.core.schedule import SHUTTLE_FIXED
+        from shuttle_system.core.semester import semester_of
+        from shuttle_system.emailer import notify_admin_semester
+
+        today_iso = _dt.now().strftime('%Y-%m-%d')
+        info = semester_of(today_iso)
+        if info['is_vacation'] or info['week'] != 1:
+            st.session_state['sa_result'] = {
+                'frozen': True,
+                'reason': ('방학 중' if info['is_vacation']
+                           else f"학기 {info['week']}주차 — 1주차에만 전환"),
+                'semester': info,
+            }
+        else:
+            t_year, t_term = info['semester_id'].split('-')
+            t_year, t_term = int(t_year), int(t_term)
+            prev_id = (f'{t_year - 1}-2' if t_term == 1
+                       else f'{t_year}-1')
+            archived_rows = archive_semester(store, prev_id, fare=fare)
+            fb = {
+                'to_station': [dict(e) for e in SHUTTLE_FIXED['to_station']],
+                'to_campus': [dict(e) for e in SHUTTLE_FIXED['to_campus']],
+            }
+            gen = generate_next_baseline(
+                store, target_semester_id=info['semester_id'],
+                fare=fare, fallback_table=fb)
+            save_new_baseline(store, gen['baseline'],
+                              effective_from=today_iso)
+            run_res = {
+                'frozen': False,
+                'archived_semester': prev_id,
+                'archived_slot_count': len(archived_rows),
+                'new_semester': info['semester_id'],
+                'effective_from': today_iso,
+                'used_fallback': gen['used_fallback'],
+                'weight_info': gen['weight_info'],
+                'baseline': gen['baseline'],
+            }
+            admin_email = os.environ.get('ADMIN_EMAIL', '')
+            mail = notify_admin_semester(admin_email, run_res)
+            run_res['mail_sent'] = bool(mail.get('sent'))
+            st.session_state['sa_result'] = run_res
+
+    # 미리보기 전용: 적용 안 함 — 학기 중 아무 때나 가능
+    if st.button('🔍 다음 학기 baseline 미리보기', key='sa_preview',
+                 use_container_width=True):
+        from datetime import datetime as _dt
+        from shuttle_system.agents.semester_agent import generate_next_baseline
+        from shuttle_system.core.schedule import SHUTTLE_FIXED
+        from shuttle_system.core.semester import semester_of
+
+        today_iso = _dt.now().strftime('%Y-%m-%d')
+        info = semester_of(today_iso)
+        cur_year, cur_term = info['semester_id'].split('-')
+        cur_year, cur_term = int(cur_year), int(cur_term)
+        if info.get('is_vacation'):
+            target_id = info.get('next_semester_id') or info['semester_id']
+        else:
+            target_id = (f'{cur_year}-2' if cur_term == 1
+                         else f'{cur_year + 1}-1')
+        fb = {
+            'to_station': [dict(e) for e in SHUTTLE_FIXED['to_station']],
+            'to_campus': [dict(e) for e in SHUTTLE_FIXED['to_campus']],
+        }
+        gen = generate_next_baseline(
+            store, target_semester_id=target_id, fare=fare,
+            fallback_table=fb)
+        st.session_state['sa_preview'] = {
+            'target_semester': target_id,
+            'current_semester': info,
+            'used_fallback': gen['used_fallback'],
+            'weight_info': gen['weight_info'],
+            'baseline': gen['baseline'],
+        }
+        st.session_state.pop('sa_result', None)
+
+    # 결과 표시
+    res = st.session_state.get('sa_result')
+    prev = st.session_state.get('sa_preview')
+    show = res or prev
+    if show:
+        if show.get('frozen'):
+            st.warning(f"동결: {show.get('reason', '학기 1주차 아님')}")
+            sem = show.get('semester', {})
+            st.caption(
+                f"현재 {sem.get('semester_id', '?')} · "
+                f"{sem.get('week', '?')}주차 · "
+                f"방학 여부 {sem.get('is_vacation', '?')}")
+        else:
+            mode_label = ('적용 완료' if res else '미리보기 (적용 안 됨)')
+            target = show.get('new_semester') or show.get('target_semester')
+            st.markdown(f'**🎯 대상 학기: `{target}` — {mode_label}**')
+            w = show.get('weight_info', {})
+            if show.get('used_fallback'):
+                st.warning(f"⚠ Fallback 사용 — {w.get('reason', '동일 학기명 archive 없음')}")
+            else:
+                st.caption(
+                    f"📚 학습 데이터: {w.get('matched_semesters', [])} · "
+                    f"가중치 {w.get('weights', [])}")
+            _render_baseline(show.get('baseline', {}))
+            if res:
+                eff = res.get('effective_from', '?')
+                arch = res.get('archived_semester', '?')
+                n_arch = res.get('archived_slot_count', 0)
+                mail_note = ('이메일 발송 ✓' if res.get('mail_sent')
+                             else '이메일 미발송 (ADMIN_EMAIL env 미설정 또는 발송 실패)')
+                st.success(
+                    f"적용 완료 — 효력 발생 **{eff}** · "
+                    f"직전 학기 archive: {arch}({n_arch} 슬롯) · {mail_note}")
+
+    st.markdown('---')
+    st.caption('↩ 롤백 — 직전 baseline으로 즉시 복귀 (Promotion과 동일 저장소)')
+    sa_confirm = st.checkbox('정말 롤백', key='sa_rb_confirm')
+    if sa_confirm and st.button('실행', key='sa_rb_run',
+                                use_container_width=True):
+        from shuttle_system.agents.promotion_agent import rollback_to_previous
+        from shuttle_system.core.booking_window import next_monday_midnight
+        r = rollback_to_previous(store, effective_from=next_monday_midnight())
+        if r['rolled_back']:
+            st.success(f"복귀됨 — 직전({r['restored_from']}) → 활성")
+        else:
+            st.error(r.get('reason', '롤백 실패'))
+        st.session_state['sa_rb_confirm'] = False
+
+
 # ── 사이드바: 📑 주간 보고서 ───────────────────────────
 # 매주 월요일 00시가 지나면 직전 주(Mon~Sun)가 "완료 주차"로 추가된다.
 # 사이드바 좌상단 >> 토글을 열면 보고서 탭이 보인다.

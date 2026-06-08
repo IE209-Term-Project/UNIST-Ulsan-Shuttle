@@ -148,6 +148,66 @@ def notify_admin_promotion(admin_email, eval_result, apply_result=None):
     return send(admin_email, subj, '\n'.join(lines))
 
 
+def notify_admin_semester(admin_email, run_result):
+    """Semester Agent 실행 결과를 관리자 이메일로 발송.
+
+    run_result: /api/semester/run 응답 dict.
+    """
+    if not admin_email:
+        return {'sent': False, 'reason': 'no_admin_email'}
+
+    WD = '월화수목금토일'
+    DIR = {'to_station': '울산역행', 'to_campus': '캠퍼스행'}
+
+    if run_result.get('frozen'):
+        lines = [
+            'UNIST↔울산역 셔틀 · 학기 전환 (동결)',
+            '',
+            f"사유: {run_result.get('reason', '학기 1주차 아님')}",
+            f"현재 학기 정보: {run_result.get('semester', {})}",
+        ]
+        return send(admin_email,
+                    '[UNIST 셔틀] 학기 전환 평가 (동결)',
+                    '\n'.join(lines))
+
+    baseline = run_result.get('baseline', {})
+    weight = run_result.get('weight_info', {})
+    used_fallback = run_result.get('used_fallback', False)
+
+    lines = [
+        'UNIST↔울산역 셔틀 · 학기 baseline 전환 결과',
+        '',
+        f"직전 학기 archive: {run_result.get('archived_semester', '?')} "
+        f"({run_result.get('archived_slot_count', 0)} 슬롯)",
+        f"새 학기: {run_result.get('new_semester', '?')}",
+        f"효력 발생일: {run_result.get('effective_from', '?')}",
+        '',
+    ]
+    if used_fallback:
+        lines.append(f"⚠ Fallback 사용 — {weight.get('reason', '동일 학기명 archive 없음')}")
+    else:
+        lines.append(
+            f"📚 학습 데이터: {weight.get('matched_semesters', [])} "
+            f"(가중치 {weight.get('weights', [])})")
+    lines.append('')
+
+    for direction, label in [('to_station', '울산역행'), ('to_campus', '캠퍼스행')]:
+        entries = baseline.get(direction, [])
+        lines.append(f"[{label}] 고정 슬롯 {len(entries)}개")
+        for e in entries:
+            wd = e.get('wd')
+            lines.append(
+                f"  · {WD[wd]}요일 {e.get('shuttle', '?')}  "
+                f"(예상 수요 {e.get('demand', 0)}명)")
+        lines.append('')
+
+    lines.append('되돌리려면 관리자 대시보드의 [↩ 직전 baseline으로 롤백] 버튼을 사용하세요.')
+
+    n_slots = sum(len(baseline.get(d, [])) for d in baseline)
+    subj = f'[UNIST 셔틀] 학기 baseline 전환 — 고정 슬롯 {n_slots}개'
+    return send(admin_email, subj, '\n'.join(lines))
+
+
 def send_confirmation(email, name, direction, shuttle_time, travel_date, service,
                       tentative=False, reservations=None, required=None):
     """예약 즉시 본인에게 보내는 메일.

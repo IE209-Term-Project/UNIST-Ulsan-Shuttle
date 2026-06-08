@@ -430,7 +430,54 @@ def api_semester_run():
         'baseline_slot_count': (len(gen['baseline'].get('to_station', []))
                                 + len(gen['baseline'].get('to_campus', []))),
         'weight_info': gen['weight_info'],
+        'baseline': gen['baseline'],
     }
+
+
+@app.post('/api/semester/preview')
+def api_semester_preview():
+    """다음 학기 baseline 미리보기 — 적용 안 함. 학기 중 아무 때나 호출 가능."""
+    from shuttle_system.agents.semester_agent import generate_next_baseline
+    from shuttle_system.core.schedule import SHUTTLE_FIXED
+
+    today_iso = _today()
+    info = semester_of(today_iso)
+    # 다음 학기 ID (이번이 1학기면 2학기, 2학기면 다음 해 1학기)
+    cur_year, cur_term = info['semester_id'].split('-')
+    cur_year, cur_term = int(cur_year), int(cur_term)
+    if info.get('is_vacation'):
+        # 방학 중이면 곧 시작할 다음 학기를 타깃
+        target_id = info.get('next_semester_id') or f'{cur_year}-{cur_term}'
+    else:
+        # 학기 중이면 그 다음 학기를 타깃
+        target_id = (f'{cur_year}-2' if cur_term == 1
+                     else f'{cur_year + 1}-1')
+
+    fallback = {
+        'to_station': [dict(e) for e in SHUTTLE_FIXED['to_station']],
+        'to_campus': [dict(e) for e in SHUTTLE_FIXED['to_campus']],
+    }
+    gen = generate_next_baseline(
+        store, target_semester_id=target_id, fare=FARE,
+        fallback_table=fallback)
+    return {
+        'ok': True,
+        'target_semester': target_id,
+        'current_semester': info,
+        'used_fallback': gen['used_fallback'],
+        'weight_info': gen['weight_info'],
+        'baseline': gen['baseline'],
+        'baseline_slot_count': (len(gen['baseline'].get('to_station', []))
+                                + len(gen['baseline'].get('to_campus', []))),
+    }
+
+
+@app.post('/api/semester/rollback')
+def api_semester_rollback():
+    """직전 baseline으로 즉시 복귀. schedule_overrides 공유 (Promotion과 동일)."""
+    from shuttle_system.agents.promotion_agent import rollback_to_previous
+    eff = next_monday_midnight()
+    return rollback_to_previous(store, effective_from=eff)
 
 
 def _mask_name(nm):
