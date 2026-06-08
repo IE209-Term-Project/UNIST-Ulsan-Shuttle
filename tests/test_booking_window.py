@@ -57,9 +57,16 @@ def test_reject_booking_far_future():
     assert is_within_booking_window('2026-06-15', today='2026-06-02') is False
 
 
-def test_reject_booking_past_date():
-    """과거 날짜는 막힘."""
-    assert is_within_booking_window('2026-06-01', today='2026-06-02') is False
+def test_reject_booking_past_week():
+    """지난 주 이전 날짜는 막힘 (이번 주 월요일 이전)."""
+    # 2026-06-02(화) 기준 이번 주 월요일은 2026-06-01 — 지난 주 일요일(5/31)은 거부
+    assert is_within_booking_window('2026-05-31', today='2026-06-02') is False
+    assert is_within_booking_window('2026-05-25', today='2026-06-02') is False
+
+
+def test_same_week_monday_allowed_even_if_past():
+    """오늘이 화·수여도 그 주의 월요일(과거)은 허용 — UI에서 한 주 단위로 보임."""
+    assert is_within_booking_window('2026-06-01', today='2026-06-03') is True   # 월 < 수
 
 
 def test_reject_invalid_date_string():

@@ -173,15 +173,24 @@ document.querySelectorAll('.dir-btn').forEach(b => b.onclick = () => {
 
 let GRID = null;
 
-// 예약 가능 윈도우: 오늘 ~ 다음 월요일 직전(=이번 주 일요일).
+// 예약 가능 윈도우: 이번 주 월요일 ~ 다음 월요일 직전(=일요일).
+// 한 주 = 월~일 전체가 항상 선택 가능 (오늘이 수요일이어도 그 주의 월·화도 선택 가능).
 // HTML date 입력에 min/max를 설정해 사용자가 윈도우 밖 날짜를 못 고르게 한다.
 function _bookingWindow() {
   const today = new Date(); today.setHours(0,0,0,0);
   const wd = today.getDay();           // 일=0, 월=1, ..., 토=6
-  const daysToSun = wd === 0 ? 0 : 7 - wd;   // 이번 주 일요일까지
-  const sun = new Date(today); sun.setDate(today.getDate() + daysToSun);
-  const iso = d => d.toISOString().slice(0,10);
-  return { min: iso(today), max: iso(sun) };
+  // 월요일을 주 시작으로: 일=0이면 6일 전(=지난 월), 월=1이면 0일, ..., 토=6이면 5일 전
+  const daysSinceMon = (wd + 6) % 7;
+  const mon = new Date(today); mon.setDate(today.getDate() - daysSinceMon);
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  // 로컬 날짜 기반 YYYY-MM-DD (toISOString은 UTC라 타임존 차이로 하루 어긋남)
+  const iso = d => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  };
+  return { min: iso(mon), max: iso(sun) };
 }
 
 async function checkVacation() {

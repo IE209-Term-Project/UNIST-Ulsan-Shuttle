@@ -156,7 +156,7 @@ def api_reserve(req: ReserveReq):
         nm = next_monday_midnight()
         return JSONResponse(
             {'ok': False, 'info': (
-                f'예약 가능 기간은 오늘부터 {nm} 직전(다음 월요일 00시 전)까지입니다. '
+                f'예약 가능 기간은 이번 주 월요일부터 {nm} 직전(다음 월요일 00시 전)까지입니다. '
                 f'다음 주 셔틀은 {nm}부터 예약하실 수 있습니다.')},
             status_code=400)
     # 1) 추천/예약 에이전트 — 결정론
