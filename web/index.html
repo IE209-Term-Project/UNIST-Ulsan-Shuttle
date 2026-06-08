@@ -49,6 +49,12 @@
 
   <!-- Reserve card -->
   <section id="reserve" class="bg-white rounded-3xl p-7 card mb-8">
+    <div class="mb-5 p-3 rounded-2xl bg-amber-50 text-amber-900 text-xs leading-relaxed">
+      <strong>📅 예약 가능 기간 안내</strong><br>
+      셔틀 시간표는 <b>매주 월요일 00시</b>에 수요 데이터로 갱신됩니다.
+      따라서 예약은 <b>오늘부터 이번 주 일요일까지</b>의 셔틀만 가능합니다.
+      다음 주 셔틀은 다음 월요일부터 예약 가능합니다.
+    </div>
     <div class="space-y-5">
       <div class="grid grid-cols-2 gap-3">
         <div>
@@ -161,8 +167,24 @@ document.querySelectorAll('.dir-btn').forEach(b => b.onclick = () => {
 });
 
 let GRID = null;
+
+// 예약 가능 윈도우: 오늘 ~ 다음 월요일 직전(=이번 주 일요일).
+// HTML date 입력에 min/max를 설정해 사용자가 윈도우 밖 날짜를 못 고르게 한다.
+function _bookingWindow() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const wd = today.getDay();           // 일=0, 월=1, ..., 토=6
+  const daysToSun = wd === 0 ? 0 : 7 - wd;   // 이번 주 일요일까지
+  const sun = new Date(today); sun.setDate(today.getDate() + daysToSun);
+  const iso = d => d.toISOString().slice(0,10);
+  return { min: iso(today), max: iso(sun) };
+}
+
 async function init() {
-  $('date').value = new Date().toISOString().slice(0,10);
+  const win = _bookingWindow();
+  const dateInput = $('date');
+  dateInput.value = win.min;
+  dateInput.min = win.min;
+  dateInput.max = win.max;
   // 이름/이메일은 새로고침 시 매번 비운다 (이전에 입력한 정보가 남으면 안 됨)
   $('name').value = '';
   $('email').value = '';

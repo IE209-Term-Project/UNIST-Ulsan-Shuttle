@@ -17,6 +17,10 @@ from pydantic import BaseModel
 from shuttle_system.storage import make_store
 from shuttle_system.core.optimization import POLICY_FARE, breakeven_N
 from shuttle_system.core.schedule import all_slots, WEEKDAY_KR
+from shuttle_system.core.schedule_overrides import refresh_active_schedule
+from shuttle_system.core.booking_window import (
+    is_within_booking_window, next_monday_midnight,
+)
 from shuttle_system import timetable
 from shuttle_system.recommend import recommend, slot_status, resolve_ktx, weekday_of
 from shuttle_system.agents.data_agent import fetch_513_arrival
@@ -30,6 +34,20 @@ store = make_store()
 FARE = POLICY_FARE
 WEB = Path(__file__).parent / 'web'
 app.mount('/static', StaticFiles(directory=WEB / 'static'), name='static')
+
+
+@app.middleware('http')
+async def _refresh_schedule_overrides(request, call_next):
+    """매 요청 시 활성 시간표를 최신화 (5분 캐시라 시트 호출은 5분에 1회).
+
+    Promotion Agent가 새 baseline을 적재하면 다음 요청부터 (또는 캐시 만료 후)
+    학생 앱에 자동 반영된다.
+    """
+    try:
+        refresh_active_schedule(store)
+    except Exception:
+        pass  # 시트 일시 오류로 전체 요청이 깨지지 않도록 보호
+    return await call_next(request)
 
 # 결정론 멀티 에이전트 흐름 (LLM 미사용). LLM은 운영 리포트 서술 등 안전한 영역에만.
 # Orchestrator(LLM planner)는 메시지 왜곡 위험으로 메인 흐름에서 제외했다.
@@ -103,6 +121,15 @@ class ReserveReq(StatusReq):
 @app.post('/api/reserve')
 def api_reserve(req: ReserveReq):
     date = (req.travel_date or '').strip() or _today()
+    # 0) 예약 윈도우 검사 — 다음 월요일 00시 이후는 거부
+    #    (시간표 갱신 시점이라 예약을 받아두면 변경 영향에 노출됨)
+    if not is_within_booking_window(date):
+        nm = next_monday_midnight()
+        return JSONResponse(
+            {'ok': False, 'info': (
+                f'예약 가능 기간은 오늘부터 {nm} 직전(다음 월요일 00시 전)까지입니다. '
+                f'다음 주 셔틀은 {nm}부터 예약하실 수 있습니다.')},
+            status_code=400)
     # 1) 추천/예약 에이전트 — 결정론
     ktx, info = resolve_ktx(store, req.direction, req.mode,
                             _opt_time(req.train_time), req.desire_time, date, FARE)
@@ -206,6 +233,12 @@ def api_cancel(req: CancelReq):
 @app.post('/api/carpool/signup')
 def api_carpool_signup(req: CarpoolReq):
     date = (req.travel_date or '').strip() or _today()
+    if not is_within_booking_window(date):
+        nm = next_monday_midnight()
+        return JSONResponse(
+            {'ok': False, 'info': (
+                f'카풀 신청도 예약 윈도우와 동일하게 {nm} 직전까지 가능합니다.')},
+            status_code=400)
     ktx, info = resolve_ktx(store, req.direction, req.mode,
                             _opt_time(req.train_time), req.desire_time, date, FARE)
     if ktx is None:
