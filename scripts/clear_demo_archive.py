@@ -19,7 +19,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shuttle_system.storage import make_store
 
-DEMO_SEMESTER_IDS = ['2025-1', '2024-1', '2023-1']
+DEMO_SEMESTER_IDS = ['2025-1', '2024-1', '2023-1',
+                     '2025-2', '2024-2', '2023-2']
 
 
 def main():

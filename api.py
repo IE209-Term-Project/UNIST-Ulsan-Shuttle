@@ -59,6 +59,26 @@ def _today():
     return datetime.now().strftime('%Y-%m-%d')
 
 
+# ── 진단용: 이메일 발송 실패 원인 노출 (운영 끝나면 제거) ───
+@app.get('/api/_email_diag')
+def api_email_diag(to: str = ''):
+    """to= 파라미터로 메일 발송 결과를 그대로 반환. 환경/자격증명 진단용."""
+    import os as _os
+    from shuttle_system.emailer import send as _send
+    env_status = {
+        'has_resend_key': bool(_os.environ.get('RESEND_API_KEY')),
+        'resend_from': _os.environ.get('RESEND_FROM', '(default)'),
+        'has_gmail_user': bool(_os.environ.get('GMAIL_USER')),
+        'gmail_user': _os.environ.get('GMAIL_USER', '')[:5] + '...',
+        'has_gmail_pw': bool(_os.environ.get('GMAIL_APP_PASSWORD')),
+        'gmail_pw_len': len(_os.environ.get('GMAIL_APP_PASSWORD', '')),
+    }
+    if not to:
+        return {'env': env_status, 'note': 'append ?to=email@example.com to actually send'}
+    result = _send(to, '[진단] HF 이메일 발송 테스트', 'HF Space에서 발송 시도 결과를 확인하는 진단 메일입니다.')
+    return {'env': env_status, 'send_result': result}
+
+
 def _vacation_block(travel_date):
     """방학 중이면 (True, info_dict), 아니면 (False, None).
 
