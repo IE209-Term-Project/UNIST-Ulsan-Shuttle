@@ -1,4 +1,4 @@
-name: Weekly Promotion Agent
+name: Operation Optimization Agent
 
 # 매주 월요일 00시(KST) = 일요일 15시(UTC)에 자동 실행:
 # 1) Promotion Agent — 직전 4주 데이터 평가 → 다음 월요일자 자동 적용
