@@ -215,8 +215,18 @@ async function init() {
   const win = _bookingWindow();
   const dateInput = $('date');
   dateInput.value = win.min;     // 오늘 날짜로 기본 설정
-  dateInput.min = win.min;       // 지난 날짜 선택 불가
+  dateInput.min = win.min;       // 지난 날짜 선택 불가 (HTML5 속성)
   dateInput.max = win.max;       // 이번 주 일요일까지만 선택 가능
+
+  // iOS Safari 등 일부 모바일 브라우저는 min/max 속성을 강제하지 않으므로
+  // 입력 변경 시 JS로 강제 클램프 (윈도우 밖 값을 자동으로 경계값으로 보정)
+  const clampDate = () => {
+    if (!dateInput.value) return;
+    if (dateInput.value < win.min) dateInput.value = win.min;
+    else if (dateInput.value > win.max) dateInput.value = win.max;
+  };
+  dateInput.addEventListener('change', clampDate);
+  dateInput.addEventListener('input', clampDate);
   // 이름/이메일은 새로고침 시 매번 비운다 (이전에 입력한 정보가 남으면 안 됨)
   $('name').value = '';
   $('email').value = '';
