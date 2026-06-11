@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UNIST ↔ 울산역 셔틀 예약</title>
+<!-- 브라우저 자동 스크롤 복원 비활성. body 렌더링 전에 적용되어야 모바일에서
+     '아래로 갔다 위로 올라오는' 모션이 보이지 않는다. -->
+<script>if('scrollRestoration' in history) history.scrollRestoration='manual';</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   html { scroll-behavior: smooth; }
@@ -205,12 +208,14 @@ async function checkVacation() {
 
 async function init() {
   // 새로고침 시 항상 페이지 최상단부터 시작 (iOS Safari는 auto restore가
-  // 늦게 일어나므로 load/pageshow에도 한 번 더 강제)
+  // 늦게 일어나므로 load/pageshow에도 한 번 더 강제). behavior:'instant'로
+  // html의 scroll-behavior:smooth를 우회 — 그래야 모션 없이 즉시 최상단.
   if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
-  window.scrollTo(0, 0);
-  window.addEventListener('load', () => window.scrollTo(0, 0));
-  window.addEventListener('pageshow', () => window.scrollTo(0, 0));
-  requestAnimationFrame(() => window.scrollTo(0, 0));
+  const toTop = () => window.scrollTo({top:0,left:0,behavior:'instant'});
+  toTop();
+  window.addEventListener('load', toTop);
+  window.addEventListener('pageshow', toTop);
+  requestAnimationFrame(toTop);
 
   const win = _bookingWindow();
   const dateInput = $('date');
