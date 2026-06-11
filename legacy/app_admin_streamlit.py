@@ -36,9 +36,55 @@ def get_store():
 
 
 st.title('UNIST–울산역 수요반응형 셔틀 운영 리포트')
-st.caption('학생 예약(Google Sheets)을 OR 모델 기준으로 집계한 관리자용 대시보드')
 
 # ── 사이드바 컨트롤 ─────────────────────────────────
+# 1) 조회 기간 (전체/주간/월간 등)
+RANGE_OPTIONS = ['전체 누적', '이번 주', '지난 주', '최근 4주', '직접 입력']
+range_choice = st.sidebar.selectbox(
+    '📅 조회 기간', RANGE_OPTIONS, index=0,
+    help='집계 대상 기간. 화면의 KPI/차트/표 전체가 선택 기간으로 다시 계산됩니다.')
+
+_today_d = _date.today()
+
+
+def _compute_date_range(choice):
+    """선택된 옵션을 (start_iso, end_iso) 또는 None(=전체)로."""
+    if choice == '전체 누적':
+        return None
+    if choice == '이번 주':
+        mon = _today_d - timedelta(days=_today_d.weekday())
+        sun = mon + timedelta(days=6)
+        return (mon.strftime('%Y-%m-%d'), sun.strftime('%Y-%m-%d'))
+    if choice == '지난 주':
+        psun = _today_d - timedelta(days=_today_d.weekday() + 1)
+        pmon = psun - timedelta(days=6)
+        return (pmon.strftime('%Y-%m-%d'), psun.strftime('%Y-%m-%d'))
+    if choice == '최근 4주':
+        start = _today_d - timedelta(days=27)
+        return (start.strftime('%Y-%m-%d'), _today_d.strftime('%Y-%m-%d'))
+    return None  # 직접 입력은 아래에서 처리
+
+
+if range_choice == '직접 입력':
+    _c1, _c2 = st.sidebar.columns(2)
+    _start = _c1.date_input('시작', value=_today_d - timedelta(days=7),
+                            key='range_start')
+    _end = _c2.date_input('끝', value=_today_d, key='range_end')
+    date_range = (_start.strftime('%Y-%m-%d'), _end.strftime('%Y-%m-%d'))
+else:
+    date_range = _compute_date_range(range_choice)
+
+# 화면 상단 캡션 — 현재 조회 범위 노출
+if date_range:
+    st.caption(
+        f'조회 기간: **{date_range[0]} ~ {date_range[1]}** '
+        f'· 학생 예약(Google Sheets)을 OR 모델 기준으로 집계')
+else:
+    st.caption(
+        '조회 기간: **전체 누적 (시작~현재)** '
+        '· 학생 예약(Google Sheets)을 OR 모델 기준으로 집계')
+
+# 2) 셔틀 요금
 fare = st.sidebar.select_slider('셔틀 요금 F (원)', options=[0, 1000, 2000, 3000], value=2000)
 n_star = breakeven_N(fare)
 st.sidebar.metric('손익분기 N*', f'{n_star}명', help='N* = ⌈C/b⌉ (운행 정당화 최소 인원)')
@@ -417,15 +463,19 @@ with st.sidebar:
 
 
 @st.cache_data(ttl=30)
-def load_report(fare):
-    return compute_operations_report(store, fare=fare)
+def load_report(fare, date_range):
+    return compute_operations_report(store, fare=fare, date_range=date_range)
 
 
-report = load_report(fare)
+report = load_report(fare, date_range)
 df = pd.DataFrame(report['slots'])
 if df.empty:
     raw = len(getattr(store.ws, 'get_all_values', lambda: [])()) if hasattr(store, 'ws') else None
-    st.info('아직 집계할 예약이 없습니다.')
+    if date_range:
+        st.info(f'선택 기간 ({date_range[0]} ~ {date_range[1]})에 집계할 예약이 없습니다. '
+                f'사이드바에서 다른 기간을 선택해보세요.')
+    else:
+        st.info('아직 집계할 예약이 없습니다.')
     st.caption(
         f"🛠 디버그 · 저장소={type(store).__name__} · 시트URL={getattr(store, 'url', '?')} · "
         f"sheet1 raw행수={raw} · SHEET_ID env앞8={(os.environ.get('RESERVATION_SHEET_ID', '?')[:8])} · "
