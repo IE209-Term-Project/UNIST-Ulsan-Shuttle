@@ -1,9 +1,10 @@
 name: Weekly Promotion Agent
 
-# 매주 월요일 00시(KST) = 일요일 15시(UTC)에 Promotion Agent 자동 실행
-# - 직전 4주 데이터로 평가
-# - 권고가 있으면 다음 월요일자로 자동 적용
-# - 관리자 이메일(ADMIN_EMAIL)로 결과 발송
+# 매주 월요일 00시(KST) = 일요일 15시(UTC)에 자동 실행:
+# 1) Promotion Agent — 직전 4주 데이터 평가 → 다음 월요일자 자동 적용
+# 2) Semester Agent — 학기 1주차일 때만 baseline 전환
+# 3) Weekly Report   — 직전 주(Mon~Sun) 운영 보고서 xlsx 관리자 메일 발송
+# 모든 결과는 관리자 이메일(ADMIN_EMAIL)로 알림
 
 on:
   schedule:
@@ -39,3 +40,14 @@ jobs:
           body=$(echo "$response" | sed '$d')
           echo "Response: $body"
           [ "$status" -eq 200 ] || { echo "ERROR: status $status"; exit 1; }
+
+      - name: Trigger /api/weekly_report/send (직전 주 보고서 발송)
+        env:
+          API_URL: ${{ secrets.SHUTTLE_API_URL }}
+        run: |
+          echo "[Weekly Report] $API_URL"
+          response=$(curl -s -w "\n%{http_code}" -X POST "$API_URL/api/weekly_report/send")
+          status=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          echo "Response: $body"
+          [ "$status" -eq 200 ] || { echo "WARN: status $status (보고서 발송 실패 — 다른 잡은 계속)"; }

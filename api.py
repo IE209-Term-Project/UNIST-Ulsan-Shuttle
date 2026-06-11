@@ -309,6 +309,62 @@ def api_notify_check():
 
 
 # ── Promotion Agent — 평가 + 자동 적용 (cron · 관리자 1버튼 공용) ──
+# ── 주간 운영 보고서 자동 발송 (매주 월요일 00 KST cron) ────
+@app.post('/api/weekly_report/send')
+def api_weekly_report_send():
+    """직전 주(Mon~Sun) 운영 보고서 xlsx를 관리자 이메일로 발송.
+
+    매주 월요일 00시(KST) GitHub Actions cron이 호출. 관리자 대시보드의
+    수동 발송 버튼도 같은 엔드포인트를 호출 가능.
+    """
+    import os as _os
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from shuttle_system.agents.report_agent import (
+        build_weekly_xlsx, compute_operations_report,
+    )
+    from shuttle_system.emailer import notify_admin_weekly_report
+
+    admin_email = _os.environ.get('ADMIN_EMAIL', '').strip()
+    if not admin_email:
+        return JSONResponse(
+            {'ok': False, 'reason': 'ADMIN_EMAIL env 미설정'},
+            status_code=400)
+
+    # 직전 주 (KST 기준 월~일)
+    kst = _tz(_td(hours=9))
+    today_kst = _dt.now(kst).date()
+    prev_sun = today_kst - _td(days=today_kst.weekday() + 1)
+    prev_mon = prev_sun - _td(days=6)
+    mon_iso = prev_mon.strftime('%Y-%m-%d')
+    sun_iso = prev_sun.strftime('%Y-%m-%d')
+
+    try:
+        xlsx_bytes = build_weekly_xlsx(store, mon_iso, sun_iso, fare=FARE)
+    except Exception as e:
+        return JSONResponse({'ok': False, 'reason': f'xlsx build fail: {e}'},
+                            status_code=500)
+
+    # 본문 KPI는 그 주 운영 리포트로 채움 (xlsx와 동일 소스)
+    try:
+        report = compute_operations_report(
+            store, fare=FARE, date_range=(mon_iso, sun_iso))
+        summary = {
+            'total_runs': report.get('total_runs', 0),
+            'total_passengers': report.get('total_passengers', 0),
+            'total_net_benefit': report.get('total_net_benefit', 0),
+            'total_wait_saved_hours': report.get('total_wait_saved_hours', 0),
+        }
+    except Exception:
+        summary = None
+
+    mail = notify_admin_weekly_report(
+        admin_email, xlsx_bytes, mon_iso, sun_iso, summary=summary)
+    return {'ok': True, 'window': f'{mon_iso} ~ {sun_iso}',
+            'admin_email': admin_email[:5] + '...',
+            'mail_sent': bool(mail.get('sent')),
+            'mail_detail': mail}
+
+
 @app.post('/api/promotion/run')
 def api_promotion_run():
     """매주 월요일 00시(KST) GitHub Actions cron이 호출하는 자동 엔드포인트.

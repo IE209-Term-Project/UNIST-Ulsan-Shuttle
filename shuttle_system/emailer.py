@@ -26,18 +26,26 @@ SMTP_HOST = 'smtp.gmail.com'
 SMTP_PORT = 587
 
 
-def _send_via_resend(to_email, subject, body):
+def _send_via_resend(to_email, subject, body, attachments=None):
+    """Resend로 발송. attachments=[{filename, content(bytes)}] 지원."""
     key = os.environ.get('RESEND_API_KEY')
     if not key:
         return None  # 폴백 시도하라는 신호
     from_addr = os.environ.get('RESEND_FROM', 'UNIST Shuttle <onboarding@resend.dev>')
+    payload = {'from': from_addr, 'to': [to_email],
+               'subject': subject, 'text': body}
+    if attachments:
+        import base64
+        payload['attachments'] = [
+            {'filename': a['filename'],
+             'content': base64.b64encode(a['content']).decode('ascii')}
+            for a in attachments]
     try:
         r = requests.post(RESEND_URL,
                           headers={'Authorization': f'Bearer {key}',
                                    'Content-Type': 'application/json'},
-                          json={'from': from_addr, 'to': [to_email],
-                                'subject': subject, 'text': body},
-                          timeout=10)
+                          json=payload,
+                          timeout=15)
         if r.status_code in (200, 201, 202):
             return {'sent': True, 'to': to_email, 'via': 'resend',
                     'id': r.json().get('id')}
@@ -47,7 +55,8 @@ def _send_via_resend(to_email, subject, body):
         return {'sent': False, 'reason': str(e)}
 
 
-def _send_via_smtp(to_email, subject, body):
+def _send_via_smtp(to_email, subject, body, attachments=None):
+    """Gmail SMTP로 발송. attachments=[{filename, content(bytes)}] 지원."""
     user = os.environ.get('GMAIL_USER')
     pw = os.environ.get('GMAIL_APP_PASSWORD')
     if not (user and pw):
@@ -57,6 +66,13 @@ def _send_via_smtp(to_email, subject, body):
     msg['To'] = to_email
     msg['Subject'] = subject
     msg.set_content(body)
+    if attachments:
+        for a in attachments:
+            # xlsx의 공식 MIME: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+            mt = a.get('mimetype', 'application/octet-stream')
+            maintype, _, subtype = mt.partition('/')
+            msg.add_attachment(a['content'], maintype=maintype, subtype=subtype,
+                               filename=a['filename'])
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as s:
             s.starttls()
@@ -67,19 +83,17 @@ def _send_via_smtp(to_email, subject, body):
         return {'sent': False, 'reason': str(e)}
 
 
-def send(to_email, subject, body):
-    """단건 발송. Resend 우선, 실패하거나 키가 없으면 Gmail SMTP 폴백.
+def send(to_email, subject, body, attachments=None):
+    """단건 발송. Resend 우선, 실패하면 Gmail SMTP 폴백.
 
-    이전 버전은 Resend가 어떤 실패를 반환해도 SMTP로 안 넘어갔다(키만 있으면).
-    그래서 Resend 샌드박스(가입자 메일만 수신 가능) 환경에서 다른 수신자는 모두
-    실패하고 SMTP 폴백도 안 됐다. 이제는 Resend 실패 = SMTP 시도.
+    attachments=[{filename, content(bytes), mimetype}] 지원.
     """
     if not (to_email and '@' in to_email):
         return {'sent': False, 'reason': 'bad_recipient'}
-    res = _send_via_resend(to_email, subject, body)
+    res = _send_via_resend(to_email, subject, body, attachments=attachments)
     if res is not None and res.get('sent'):
         return res
-    smtp_res = _send_via_smtp(to_email, subject, body)
+    smtp_res = _send_via_smtp(to_email, subject, body, attachments=attachments)
     if smtp_res.get('sent'):
         return smtp_res
     # 둘 다 실패 — 진단을 위해 Resend 실패 원인도 함께 반환
@@ -146,6 +160,49 @@ def notify_admin_promotion(admin_email, eval_result, apply_result=None):
     subj = (f'[UNIST 셔틀] 슬롯 등급 평가 — 변경 {n_change}건'
             if n_change else '[UNIST 셔틀] 슬롯 등급 평가 — 변경 없음')
     return send(admin_email, subj, '\n'.join(lines))
+
+
+def notify_admin_weekly_report(admin_email, xlsx_bytes, week_start_iso, week_end_iso,
+                                summary=None):
+    """주간 운영 보고서(xlsx)를 관리자 이메일에 첨부 발송.
+
+    매주 월요일 cron에서 직전 주(Mon~Sun)를 정리해 호출.
+    summary: 선택 — 본문에 간단 KPI 요약(dict).
+    """
+    if not admin_email:
+        return {'sent': False, 'reason': 'no_admin_email'}
+    if not xlsx_bytes:
+        return {'sent': False, 'reason': 'no_xlsx'}
+
+    filename = f'unist-shuttle-weekly-{week_start_iso}.xlsx'
+    subject = f'[UNIST 셔틀] 주간 운영 보고서 — {week_start_iso} ~ {week_end_iso}'
+
+    lines = [
+        f'UNIST↔울산역 셔틀 · 주간 운영 보고서',
+        '',
+        f'대상 주차: {week_start_iso} (월) ~ {week_end_iso} (일)',
+        '',
+    ]
+    if summary:
+        lines += [
+            f"· 운행 횟수: {summary.get('total_runs', 0)}회",
+            f"· 수송 인원: {summary.get('total_passengers', 0)}명",
+            f"· 실현 순편익: ₩{summary.get('total_net_benefit', 0):,}",
+            f"· 대기 절감: {summary.get('total_wait_saved_hours', 0)}시간",
+            '',
+        ]
+    lines += [
+        f'첨부 파일: {filename} (5개 시트 — Summary/Matrix/Detail/Charts/Recommendation)',
+        '',
+        '본 메일은 매주 월요일 00시(KST) 자동 발송됩니다.',
+    ]
+
+    attachments = [{
+        'filename': filename,
+        'content': xlsx_bytes,
+        'mimetype': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }]
+    return send(admin_email, subject, '\n'.join(lines), attachments=attachments)
 
 
 def notify_admin_semester(admin_email, run_result):

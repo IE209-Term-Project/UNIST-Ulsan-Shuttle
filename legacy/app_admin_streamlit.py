@@ -114,7 +114,7 @@ with st.sidebar.expander('📋 슬롯 등급 관리', expanded=False):
 
         if st.session_state.get('pa_applied'):
             mail_note = ('이메일 발송 ✓' if st.session_state.get('pa_mail')
-                         else '이메일 미발송 (ADMIN_EMAIL env 미설정)')
+                         else '이메일 미발송 (ADMIN_EMAIL env 미설정 또는 발송 실패)')
             st.success(
                 f"적용 완료 — 효력 발생 **{st.session_state.get('pa_eff', '')}** · "
                 f"{mail_note}")
@@ -325,7 +325,40 @@ with st.sidebar:
     st.markdown('---')
     st.markdown('### 📑 보고서')
     st.caption('월별 폴더에 주차별 .xlsx 보고서가 정리됩니다. '
-               '매주 월요일 00시가 지나면 직전 주가 자동으로 추가됩니다.')
+               '매주 월요일 00시(KST) 자동으로 직전 주 보고서가 추가되며, '
+               '동시에 관리자 이메일(ADMIN_EMAIL)로 xlsx 첨부 발송됩니다.')
+
+    # 수동 즉시 발송 — 시연/검증용
+    if st.button('📨 지금 직전 주 보고서 이메일 발송', key='wr_send',
+                 use_container_width=True):
+        from datetime import date as _date2, timedelta as _td2
+        from shuttle_system.agents.report_agent import build_weekly_xlsx as _bwx
+        from shuttle_system.agents.report_agent import (
+            compute_operations_report as _cor,
+        )
+        from shuttle_system.emailer import notify_admin_weekly_report
+        _today2 = _date2.today()
+        _psun = _today2 - _td2(days=_today2.weekday() + 1)
+        _pmon = _psun - _td2(days=6)
+        _mi, _si = _pmon.strftime('%Y-%m-%d'), _psun.strftime('%Y-%m-%d')
+        admin_email = os.environ.get('ADMIN_EMAIL', '').strip()
+        if not admin_email:
+            st.error('ADMIN_EMAIL env 미설정 — Space Secrets에 ADMIN_EMAIL 추가 필요')
+        else:
+            try:
+                xlsx = _bwx(store, _mi, _si, fare=fare)
+                rep = _cor(store, fare=fare, date_range=(_mi, _si))
+                summary = {k: rep.get(k, 0) for k in
+                           ('total_runs', 'total_passengers',
+                            'total_net_benefit', 'total_wait_saved_hours')}
+                m = notify_admin_weekly_report(
+                    admin_email, xlsx, _mi, _si, summary=summary)
+                if m.get('sent'):
+                    st.success(f"✅ 발송 완료 — {admin_email} ({_mi} ~ {_si})")
+                else:
+                    st.error(f"❌ 발송 실패: {m.get('reason', '?')}")
+            except Exception as e:
+                st.error(f"❌ 보고서 생성/발송 실패: {e}")
     try:
         recs = store.all_records()
     except Exception as e:
