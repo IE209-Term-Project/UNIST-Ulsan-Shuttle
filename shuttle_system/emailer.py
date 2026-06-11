@@ -118,7 +118,7 @@ def notify_admin_promotion(admin_email, eval_result, apply_result=None):
     demotes = eval_result.get('demotions', [])
     frozen = eval_result.get('frozen', False)
 
-    lines = ['UNIST↔울산역 셔틀 · 슬롯 등급 평가 결과', '']
+    lines = ['UNIST↔울산역 셔틀 · 주간 시간표 자동 개편 결과', '']
     lines.append(f"평가 시각: {eval_result.get('evaluated_at', '')}")
     lines.append(
         f"평가 윈도우: {eval_result.get('window_start', '')} "
@@ -128,7 +128,7 @@ def notify_admin_promotion(admin_email, eval_result, apply_result=None):
         lines.append(
             f"⚠ 동결: {eval_result.get('frozen_reason', '콜드 스타트')}")
         return send(admin_email,
-                    '[UNIST 셔틀] 슬롯 등급 평가 (동결)',
+                    '[UNIST 셔틀] 시간표 개편 보류 (콜드 스타트)',
                     '\n'.join(lines))
 
     lines.append('')
@@ -157,8 +157,8 @@ def notify_admin_promotion(admin_email, eval_result, apply_result=None):
         lines.append('관리자 대시보드에서 [✅ 적용] 또는 [무시] 결정을 내려주세요.')
 
     n_change = len(promos) + len(demotes)
-    subj = (f'[UNIST 셔틀] 슬롯 등급 평가 — 변경 {n_change}건'
-            if n_change else '[UNIST 셔틀] 슬롯 등급 평가 — 변경 없음')
+    subj = (f'[UNIST 셔틀] 주간 시간표 자동 개편 — 변경 {n_change}건'
+            if n_change else '[UNIST 셔틀] 주간 시간표 점검 — 변경 없음')
     return send(admin_email, subj, '\n'.join(lines))
 
 
@@ -218,13 +218,13 @@ def notify_admin_semester(admin_email, run_result):
 
     if run_result.get('frozen'):
         lines = [
-            'UNIST↔울산역 셔틀 · 학기 전환 (동결)',
+            'UNIST↔울산역 셔틀 · 다음 학기 시간표 편성 (보류)',
             '',
             f"사유: {run_result.get('reason', '학기 1주차 아님')}",
             f"현재 학기 정보: {run_result.get('semester', {})}",
         ]
         return send(admin_email,
-                    '[UNIST 셔틀] 학기 전환 평가 (동결)',
+                    '[UNIST 셔틀] 다음 학기 시간표 편성 보류',
                     '\n'.join(lines))
 
     baseline = run_result.get('baseline', {})
@@ -232,7 +232,7 @@ def notify_admin_semester(admin_email, run_result):
     used_fallback = run_result.get('used_fallback', False)
 
     lines = [
-        'UNIST↔울산역 셔틀 · 학기 baseline 전환 결과',
+        'UNIST↔울산역 셔틀 · 다음 학기 시간표 편성 완료',
         '',
         f"직전 학기 archive: {run_result.get('archived_semester', '?')} "
         f"({run_result.get('archived_slot_count', 0)} 슬롯)",
@@ -261,7 +261,7 @@ def notify_admin_semester(admin_email, run_result):
     lines.append('되돌리려면 관리자 대시보드의 [이전 시간표로 복원] 버튼을 사용하세요.')
 
     n_slots = sum(len(baseline.get(d, [])) for d in baseline)
-    subj = f'[UNIST 셔틀] 학기 baseline 전환 — 고정 슬롯 {n_slots}개'
+    subj = f'[UNIST 셔틀] 다음 학기 시간표 편성 완료 — 고정 {n_slots}개'
     return send(admin_email, subj, '\n'.join(lines))
 
 
