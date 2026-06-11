@@ -151,7 +151,7 @@ def notify_admin_promotion(admin_email, eval_result, apply_result=None):
         lines.append(
             f"✅ 적용 완료 — 효력 발생: {apply_result.get('effective_from', '')}")
         lines.append(
-            '되돌리려면 관리자 대시보드의 [↩ 직전 시간표로 롤백] 버튼을 사용하세요.')
+            '되돌리려면 관리자 대시보드의 [이전 시간표로 복원] 버튼을 사용하세요.')
     else:
         lines.append('')
         lines.append('관리자 대시보드에서 [✅ 적용] 또는 [무시] 결정을 내려주세요.')
@@ -258,7 +258,7 @@ def notify_admin_semester(admin_email, run_result):
                 f"(예상 수요 {e.get('demand', 0)}명)")
         lines.append('')
 
-    lines.append('되돌리려면 관리자 대시보드의 [↩ 직전 baseline으로 롤백] 버튼을 사용하세요.')
+    lines.append('되돌리려면 관리자 대시보드의 [이전 시간표로 복원] 버튼을 사용하세요.')
 
     n_slots = sum(len(baseline.get(d, [])) for d in baseline)
     subj = f'[UNIST 셔틀] 학기 baseline 전환 — 고정 슬롯 {n_slots}개'

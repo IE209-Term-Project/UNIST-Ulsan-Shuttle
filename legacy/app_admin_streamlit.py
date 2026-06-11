@@ -94,15 +94,15 @@ if st.sidebar.button('🔄 새로고침'):
 store = get_store()
 
 
-# ── 사이드바: 📋 슬롯 등급 관리 (Promotion Agent) ──────
-with st.sidebar.expander('📋 슬롯 등급 관리', expanded=False):
+# ── 사이드바: 📅 주간 시간표 자동 개편 (Promotion Agent) ──────
+with st.sidebar.expander('📅 주간 시간표 자동 개편', expanded=False):
     st.caption(
-        '단기 Promotion Agent — 매주 월요일 00시(KST) **자동 평가+적용**. '
-        '아래는 같은 동작을 즉시 수동 실행하는 인터페이스입니다. '
-        '평가 결과는 이메일로 발송되며, 문제 시 1클릭 롤백 가능.')
+        '직전 4주 예약 수요를 분석해 **고정편↔조건부편을 자동 재편성**합니다. '
+        '매주 월요일 00시(KST) 자동 실행되며, 아래는 같은 동작의 수동 인터페이스입니다. '
+        '개편 결과는 이메일로 발송되고, 문제 시 이전 시간표로 즉시 복원할 수 있습니다.')
 
     # 메인: 평가+자동 적용 (cron과 동일 동작) ─────────
-    if st.button('⚡ 평가 + 자동 적용', key='pa_run',
+    if st.button('⚡ 시간표 개편 실행 (분석+적용)', key='pa_run',
                  use_container_width=True, type='primary'):
         from shuttle_system.agents.promotion_agent import (
             evaluate_promotions, apply_promotions,
@@ -127,7 +127,7 @@ with st.sidebar.expander('📋 슬롯 등급 관리', expanded=False):
         st.session_state['pa_mail'] = bool(mail.get('sent'))
 
     # 미리보기 전용: 평가만 (적용 안 함) ───────────────
-    if st.button('🔍 평가만 (미리보기)', key='pa_preview',
+    if st.button('🔍 개편안 미리보기 (적용 안 함)', key='pa_preview',
                  use_container_width=True):
         from shuttle_system.agents.promotion_agent import evaluate_promotions
         st.session_state['pa_result'] = evaluate_promotions(store, fare=fare)
@@ -136,47 +136,48 @@ with st.sidebar.expander('📋 슬롯 등급 관리', expanded=False):
     res = st.session_state.get('pa_result')
     if res:
         if res.get('frozen'):
-            st.warning(f"동결: {res.get('frozen_reason', '콜드 스타트')}")
+            st.warning(f"⏸ 개편 보류 — {res.get('frozen_reason', '운행 실적이 더 쌓이면 개편을 시작합니다')}")
         else:
             st.caption(f"윈도우: {res['window_start']} ~ {res['window_end']}")
             promos = res.get('promotions', [])
             demotes = res.get('demotions', [])
             if promos:
-                st.markdown(f'**⬆ 승격 {len(promos)}건**')
+                st.markdown(f'**⬆ 고정편 전환 {len(promos)}건** — 수요 충분, 매주 확정 운행')
                 for p in promos:
                     st.markdown(
                         f"- `{p['direction']}` {WD_ORDER[p['weekday']]} "
                         f"{p['time']}  · 평균 **{p['avg_resv']}명** · "
                         f"운행률 **{int(p['dispatch_rate']*100)}%**")
             if demotes:
-                st.markdown(f'**⬇ 강등 {len(demotes)}건**')
+                st.markdown(f'**⬇ 조건부 전환 {len(demotes)}건** — 수요 부족, 신청제로 운영')
                 for d in demotes:
                     st.markdown(
                         f"- `{d['direction']}` {WD_ORDER[d['weekday']]} "
                         f"{d['time']}  · 평균 **{d['avg_resv']}명** · "
                         f"운행률 **{int(d['dispatch_rate']*100)}%**")
             if not (promos or demotes):
-                st.success('변경 권고 없음.')
+                st.success('현행 시간표 유지 — 개편 사항 없음.')
 
         if st.session_state.get('pa_applied'):
             mail_note = ('이메일 발송 ✓' if st.session_state.get('pa_mail')
                          else '이메일 미발송 (ADMIN_EMAIL env 미설정 또는 발송 실패)')
             st.success(
-                f"적용 완료 — 효력 발생 **{st.session_state.get('pa_eff', '')}** · "
+                f"개편 완료 — 새 시간표 시행일 **{st.session_state.get('pa_eff', '')}** · "
                 f"{mail_note}")
 
     st.markdown('---')
-    st.caption('↩ 롤백 — 직전 baseline으로 즉시 복귀')
-    confirm = st.checkbox('정말 롤백', key='pa_rb_confirm')
-    if confirm and st.button('실행', key='pa_rb_run',
+    st.caption('↩ 이번 개편을 취소하고 직전 시간표를 다시 시행합니다.')
+    confirm = st.checkbox('직전 시간표로 되돌리는 것에 동의합니다',
+                          key='pa_rb_confirm')
+    if confirm and st.button('이전 시간표로 복원', key='pa_rb_run',
                              use_container_width=True):
         from shuttle_system.agents.promotion_agent import rollback_to_previous
         from shuttle_system.core.booking_window import next_monday_midnight
         r = rollback_to_previous(store, effective_from=next_monday_midnight())
         if r['rolled_back']:
-            st.success(f"복귀됨 — 직전({r['restored_from']}) → 활성")
+            st.success(f"복원 완료 — {r['restored_from']} 시행분 시간표가 다시 적용됩니다.")
         else:
-            st.error(r.get('reason', '롤백 실패'))
+            st.error(r.get('reason', '복원할 이전 시간표가 없습니다.'))
         st.session_state['pa_rb_confirm'] = False
 
 
@@ -190,7 +191,7 @@ def _render_baseline(baseline):
     for direction, label in [('to_station', '울산역행'),
                              ('to_campus', '캠퍼스행')]:
         entries = baseline.get(direction, [])
-        st.markdown(f'**[{label}] 고정 슬롯 {len(entries)}개**')
+        st.markdown(f'**[{label}] 고정 운행 {len(entries)}편**')
         if not entries:
             st.caption('— 없음')
             continue
@@ -202,14 +203,14 @@ def _render_baseline(baseline):
                 f"· 예상 수요 **{e.get('demand', 0)}명**")
 
 
-with st.sidebar.expander('🎓 학기 baseline 관리', expanded=False):
+with st.sidebar.expander('🎓 다음 학기 시간표 편성', expanded=False):
     st.caption(
-        '장기 Semester Agent — 매 학기 1주차 월요일 00시(KST) **자동 평가+적용**. '
-        '동일 학기명(예: 26-1 ← 25-1/24-1/23-1) archive를 지수가중평균(0.5/0.3/0.2)해 '
-        '새 fixed baseline 도출. 아래는 수동 인터페이스.')
+        '지난 학기들의 운행 실적으로 **다음 학기 기본 시간표를 자동 편성**합니다. '
+        '동일 학기(예: 26-1 ← 25-1/24-1/23-1) 실적을 최근 학기 가중(0.5/0.3/0.2)으로 '
+        '반영하며, 매 학기 1주차 월요일 00시(KST) 자동 시행됩니다. 아래는 수동 인터페이스.')
 
     # 메인: 학기 전환 실행 (cron과 동일 동작, 학기 1주차 아니면 frozen)
-    if st.button('⚡ 학기 전환 실행', key='sa_run',
+    if st.button('⚡ 새 학기 시간표 편성 실행', key='sa_run',
                  use_container_width=True, type='primary'):
         from datetime import datetime as _dt
         from shuttle_system.agents.semester_agent import (
@@ -260,7 +261,7 @@ with st.sidebar.expander('🎓 학기 baseline 관리', expanded=False):
             st.session_state['sa_result'] = run_res
 
     # 미리보기 전용: 적용 안 함 — 학기 중 아무 때나 가능
-    if st.button('🔍 다음 학기 baseline 미리보기', key='sa_preview_btn',
+    if st.button('🔍 다음 학기 시간표 미리보기', key='sa_preview_btn',
                  use_container_width=True):
         from datetime import datetime as _dt
         from shuttle_system.agents.semester_agent import generate_next_baseline
@@ -298,22 +299,22 @@ with st.sidebar.expander('🎓 학기 baseline 관리', expanded=False):
     show = res or prev
     if show:
         if show.get('frozen'):
-            st.warning(f"동결: {show.get('reason', '학기 1주차 아님')}")
+            st.warning(f"⏸ 편성 보류 — {show.get('reason', '학기 1주차 월요일에만 시행됩니다')}")
             sem = show.get('semester', {})
             st.caption(
                 f"현재 {sem.get('semester_id', '?')} · "
                 f"{sem.get('week', '?')}주차 · "
                 f"방학 여부 {sem.get('is_vacation', '?')}")
         else:
-            mode_label = ('적용 완료' if res else '미리보기 (적용 안 됨)')
+            mode_label = ('편성 완료' if res else '미리보기 (시행 전)')
             target = show.get('new_semester') or show.get('target_semester')
             st.markdown(f'**🎯 대상 학기: `{target}` — {mode_label}**')
             w = show.get('weight_info', {})
             if show.get('used_fallback'):
-                st.warning(f"⚠ Fallback 사용 — {w.get('reason', '동일 학기명 archive 없음')}")
+                st.warning('⚠ 과거 동일 학기 실적이 없어 기본 시간표(설문 기반)로 편성됩니다.')
             else:
                 st.caption(
-                    f"📚 학습 데이터: {w.get('matched_semesters', [])} · "
+                    f"📚 반영 학기: {w.get('matched_semesters', [])} · "
                     f"가중치 {w.get('weights', [])}")
             _render_baseline(show.get('baseline', {}))
             if res:
@@ -323,21 +324,22 @@ with st.sidebar.expander('🎓 학기 baseline 관리', expanded=False):
                 mail_note = ('이메일 발송 ✓' if res.get('mail_sent')
                              else '이메일 미발송 (ADMIN_EMAIL env 미설정 또는 발송 실패)')
                 st.success(
-                    f"적용 완료 — 효력 발생 **{eff}** · "
-                    f"직전 학기 archive: {arch}({n_arch} 슬롯) · {mail_note}")
+                    f"편성 완료 — 새 시간표 시행일 **{eff}** · "
+                    f"지난 학기({arch}) 실적 {n_arch}개 슬롯 보관 · {mail_note}")
 
     st.markdown('---')
-    st.caption('↩ 롤백 — 직전 baseline으로 즉시 복귀 (Promotion과 동일 저장소)')
-    sa_confirm = st.checkbox('정말 롤백', key='sa_rb_confirm')
-    if sa_confirm and st.button('실행', key='sa_rb_run',
+    st.caption('↩ 이번 편성을 취소하고 직전 시간표를 다시 시행합니다.')
+    sa_confirm = st.checkbox('직전 시간표로 되돌리는 것에 동의합니다',
+                             key='sa_rb_confirm')
+    if sa_confirm and st.button('이전 시간표로 복원', key='sa_rb_run',
                                 use_container_width=True):
         from shuttle_system.agents.promotion_agent import rollback_to_previous
         from shuttle_system.core.booking_window import next_monday_midnight
         r = rollback_to_previous(store, effective_from=next_monday_midnight())
         if r['rolled_back']:
-            st.success(f"복귀됨 — 직전({r['restored_from']}) → 활성")
+            st.success(f"복원 완료 — {r['restored_from']} 시행분 시간표가 다시 적용됩니다.")
         else:
-            st.error(r.get('reason', '롤백 실패'))
+            st.error(r.get('reason', '복원할 이전 시간표가 없습니다.'))
         st.session_state['sa_rb_confirm'] = False
 
 
