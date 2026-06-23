@@ -1,66 +1,241 @@
-# UNIST ↔ 울산역 수요반응형 셔틀 에이전트
+# UNIST ↔ 울산역 AI 수요반응형 셔틀 시스템
 
-AI 기반 수요대응형 셔틀 예약·추천·알림 시스템 (생산운영관리 텀프로젝트, IE209).
+> 학기·주 단위 자동 학습 에이전트 4종이 시간표를 데이터로 결정하게 만든 OR 기반 멀티에이전트 시스템.
+> **IE209 생산운영관리 텀프로젝트** · UNIST · 2026-1학기
 
-> **메인 앱 = 애플 스타일 웹앱 (`api.py` + `web/`).** Gradio/Streamlit 버전은 `legacy/`에 보관(참고용). 새 작업은 모두 메인 앱 기준으로 합니다.
+[![Tests](https://img.shields.io/badge/tests-121%20passed-brightgreen)]()
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue)]()
+[![FastAPI](https://img.shields.io/badge/FastAPI-005A7E)]()
+[![License](https://img.shields.io/badge/license-MIT-green)]()
 
 ---
 
-## 🚀 빠르게 실행 (메인 앱)
+## ✨ Highlights
+
+- 🧮 **OR 모델 기반 운행 결정** — 손익분기 N\* = ⌈C/b⌉ = 8명 (b = 사회적 편익 ₩4,983/명, C = ₩35,000/회)
+- 🤖 **단기 Promotion Agent** — 매주 월요일 00시(KST) cron이 직전 4주 데이터로 슬롯 등급 자동 개편
+- 🎓 **장기 Semester Agent** — 학기 종료 시 archive 적재 + EWMA(0.5/0.3/0.2)로 다음 학기 baseline 자동 도출
+- 📊 **Weekly Report Agent** — LLM이 KPI 해석한 운영 보고서를 xlsx 첨부 메일로 자동 발송
+- 🔔 **Alert Agent** — N\* 첫 충족 / 카풀 가능 / 지연을 능동 감지 후 단체 메일
+- ✅ **TDD 기반 121 단위 테스트 GREEN**
+- 🛡️ **롤백 안전망** — 자동 변경이 마음에 안 들면 관리자 1클릭으로 직전 상태 복원
+
+---
+
+## 🎬 라이브 데모
+
+| 서비스 | URL |
+|---|---|
+| **학생 예약 앱** (FastAPI + Vanilla JS) | [jaeeewons-unist-shuttle-web.hf.space](https://jaeeewons-unist-shuttle-web.hf.space) |
+| **관리자 대시보드** (Streamlit) | [jaeeewons-unist-shuttle-admin.hf.space](https://jaeeewons-unist-shuttle-admin.hf.space) |
+
+> HuggingFace Spaces는 미사용 시 잠들 수 있어 첫 호출은 ~10초 대기. 새로고침하면 깨어납니다.
+
+---
+
+## 🏗 시스템 아키텍처
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│              매주 월요일 00:00 KST · GitHub Actions cron       │
+└─────────────────────┬────────────────────────────────────────┘
+                      ▼
+   ┌──────────────────────────────────┐
+   │  POST /api/promotion/run          │ ─ 단기: 4주 데이터로 등급 개편
+   │  POST /api/semester/run           │ ─ 장기: 학기 1주차일 때만 EWMA
+   │  POST /api/weekly_report/send     │ ─ 보고서: xlsx 첨부 메일
+   └──────────────────────────────────┘
+                      ▼
+   ┌──────────────────────────────────┐
+   │  Google Sheets (단일 진실)        │
+   │   · 시트1            예약 로그    │
+   │   · notifications   알림 이력    │
+   │   · carpool         카풀 신청    │
+   │   · schedule_overrides  활성 baseline │
+   │   · semester_archive    학기 누적  │
+   └──────────────────────────────────┘
+                      ▼
+   ┌──────────────────────┬──────────────────────┐
+   │  FastAPI 학생 앱     │  Streamlit 관리자     │
+   │  (web/index.html)    │  (legacy/app_admin)   │
+   │  · 예약 / 카풀       │  · 운영 KPI 차트      │
+   │  · 5분 캐시 자동반영 │  · 평가/적용/롤백     │
+   └──────────────────────┴──────────────────────┘
+```
+
+### 두 시간 척도, 두 학습 방식
+
+| 척도 | 에이전트 | 학습 방식 | 동작 시점 |
+|---|---|---|---|
+| **주간** | Promotion Agent | 4주 평균·운행률 룰 (이중조건 + Dead Zone) | 매주 월요일 00시 |
+| **학기** | Semester Agent | 동일학기 EWMA (0.5/0.3/0.2) | 학기 1주차 월요일 |
+
+---
+
+## 🛠 기술 스택
+
+| 영역 | 기술 |
+|---|---|
+| **백엔드 API** | FastAPI · Python 3.9+ · Pydantic |
+| **학생 앱** | Vanilla JS · Tailwind CSS (모바일 최적화) |
+| **관리자 대시보드** | Streamlit · Altair · openpyxl (xlsx 차트) |
+| **저장소** | Google Sheets API (gspread) |
+| **자동화** | GitHub Actions (cron) |
+| **메일** | Resend API + Gmail SMTP 폴백 |
+| **LLM** | OpenAI GPT-4o-mini (운영 보고서·메시지) |
+| **테스트** | pytest (121개 GREEN) · TDD |
+| **배포** | HuggingFace Spaces (Docker) |
+
+---
+
+## 📂 디렉토리 구조
+
+```
+api.py                       FastAPI 진입점 (학생 앱 + 관리자 API)
+web/index.html               학생 예약 페이지
+legacy/app_admin_streamlit.py  관리자 대시보드 (Streamlit)
+
+shuttle_system/
+├── core/
+│   ├── optimization.py      OR 모델 — N* = ⌈C/b⌉, 사회적 편익 계산
+│   ├── schedule.py          그리드 슬롯·고정 시간표·daily_dispatch
+│   ├── schedule_overrides.py  동적 baseline (5분 캐시)
+│   ├── booking_window.py    예약 가능 윈도우 (이번 주 단위)
+│   ├── semester.py          학기 경계 (3·9월 첫 월요일 + 16주)
+│   └── connection.py        KTX-셔틀 연계 평가
+├── agents/
+│   ├── promotion_agent.py   단기: 4주 데이터로 슬롯 등급 개편
+│   ├── semester_agent.py    장기: EWMA로 학기 baseline 도출
+│   ├── alert_agent.py       능동 감지 (N* 충족/카풀/지연)
+│   ├── report_agent.py      LLM 운영 보고서 + xlsx
+│   └── (carpool/data/notify agent)
+├── recommend.py             결정론 추천 (학생 경로, LLM 없음)
+├── storage.py               Memory/Sheets 양쪽 인터페이스
+└── emailer.py               Resend + SMTP 폴백
+
+tests/                       pytest TDD (121 passed)
+scripts/                     시드/정리 도구 (발표 시연용)
+.github/workflows/
+├── weekly_promotion.yml     매주 월요일 cron (3개 에이전트 동시 실행)
+└── deploy-hf.yml            push 시 HF Spaces 자동 sync
+docs/                        설계 문서·노트북
+```
+
+---
+
+## 🚀 로컬 실행
+
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env            # 키 입력 (팀 내 공유)
-.venv/bin/uvicorn api:app --port 8000   # → http://127.0.0.1:8000
-.venv/bin/pytest                # 테스트 (키 없이도 동작)
+# 1. 가상환경 + 의존성
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# 2. (선택) 환경변수 — Google Sheets/메일/LLM 사용 시
+cp .env.example .env
+#   GOOGLE_SERVICE_ACCOUNT_FILE 또는 GOOGLE_SERVICE_ACCOUNT_JSON
+#   RESERVATION_SHEET_ID
+#   RESEND_API_KEY / RESEND_FROM 또는 GMAIL_USER + GMAIL_APP_PASSWORD
+#   ADMIN_EMAIL
+#   OPENAI_API_KEY (LLM 보고서/메시지)
+
+# 3. 학생 앱 실행
+.venv/bin/uvicorn api:app --reload --port 8000
+#   → http://127.0.0.1:8000
+
+# 4. 관리자 대시보드
+.venv/bin/streamlit run legacy/app_admin_streamlit.py
+
+# 5. 테스트
+.venv/bin/pytest
 ```
-필요한 키(`.env`): `OPENAI_API_KEY`, `ULSAN_BIS_API_KEY`, `GOOGLE_SERVICE_ACCOUNT_FILE`(또는 JSON), `RESERVATION_SHEET_ID`, (선택) `KAKAO_*`.
-> `.env`·`service_account.json`은 git에 올리지 않음. 팀 내 안전 경로로 공유.
+
+> `.env`·`service_account.json`은 `.gitignore`로 보호. 절대 커밋 금지.
 
 ---
 
-## 📁 폴더 지도
+## 🎓 핵심 설계 결정
+
+### 1. 손익분기 N* = 8 — 어떻게 나왔나
 ```
-api.py              ★ 메인 앱 진입점 (FastAPI: 예약/추천/카풀/알림/BIS/운행계획 API + 웹 서빙)
-web/index.html      ★ 메인 예약 페이지 (애플 스타일 프론트)
-index.html          랜딩 페이지 (소개용, GitHub Pages)
-shuttle_system/     핵심 패키지
-  core/             OR 모델·슬롯·연계 계산 (optimization, schedule, connection)
-  agents/           에이전트 (data, notify, report, carpool, alert)
-  recommend.py      결정론적 추천 (LLM 없음)
-  storage.py        예약/알림/카풀 저장소 (Google Sheets)
-  timetable.py      KTX/SRT 시간표 (data/timetable.json)
-  kakao.py / config.py
-tests/              pytest (47개)
-scripts/            seed_demo.py(데모 시드), get_kakao_token.py(카톡 토큰)
-docs/               PROJECT_STATUS, ARCHITECTURE, DEPLOY_HF, SETUP_KAKAO, 설계문서
-legacy/             Gradio/Streamlit 앱·옛 대시보드 (참고 보관, 메인 아님)
+편익 b = 0.3 × (택시 ₩12,000 − 셔틀 ₩2,000)
+      + 0.7 × (시간가치 ₩10,000/h × 20/60 + 시내버스 ₩1,500 − 셔틀 ₩2,000)
+      ≈ ₩4,983/명
+
+N* = ⌈C/b⌉ = ⌈35,000 / 4,983⌉ = 8명
 ```
+→ 운행 1회 사회후생이 양수가 되는 최소 인원.
+
+### 2. 단기 Promotion Agent — 룰 기반
+```
+승격 (conditional → fixed):  avg ≥ 8 AND rate ≥ 0.75 (3/4주)
+강등 (fixed → conditional):  avg < 4 AND rate ≤ 0.25 (1/4주)
+유지 (Dead Zone):             그 외
+콜드 스타트:                  학기 1~3주차 평가 동결
+```
+4주 = 표본 4개. 가중평균 의미 없음 → 단순 평균 + 이중 조건 + Dead Zone으로 단기 변동에 robust.
+
+### 3. 장기 Semester Agent — EWMA
+```
+2026-1 baseline = 2025-1 × 0.5 + 2024-1 × 0.3 + 2023-1 × 0.2
+```
+동일학기명 매칭으로 봄·가을 차이 자동 반영. 데이터 부족 시 가중치 정규화.
+첫·둘째 학기엔 archive 없음 → 하드코딩 fallback 자동 작동.
+
+### 4. 학생 보호 장치
+- **예약 가능 기간 = 이번 주(월~일)** — 변경 시점 이전까지만 예약, 사후 변경 영향 원천 차단
+- **5분 캐시** — 새 baseline 적재 후 5분 내 학생 앱 자동 반영
+- **롤백 1클릭** — 자동 변경이 잘못되면 관리자 대시보드에서 즉시 복원
 
 ---
 
-## 👥 역할 분담 (충돌 방지: 사람 = 모듈)
-| 담당 | 파일 | 영역 |
-|---|---|---|
-| **A** | `shuttle_system/core/*`, `recommend.py` | OR 모델·추천 로직 |
-| **B** | `shuttle_system/agents/*`, `kakao.py` | 에이전트·카풀·알림 |
-| **C** | `api.py`, `web/`, `index.html` | API·프론트엔드 |
-| 공용 | `storage.py`, `timetable.py` | **수정 전 팀 공유 필수** |
+## 📊 정량 결과
 
-## 🔀 Git 협업 규칙
-1. 작업 시작 전 **`git pull`** (최신 받기)
-2. 작은 단위로 자주 commit, 메시지 명확히
-3. 권장: `feat/이름-기능` 브랜치 → push → **PR** → 통합 담당이 main 병합
-4. 같은 파일 동시 수정 금지 (담당 경계 지키기)
-5. main은 **항상 동작하는 상태** 유지 (`pytest` 통과 후 push)
+설문 N=69 응답 기반 As-Is → To-Be 매칭:
+
+| As-Is 불편 (응답률) | To-Be 정량 개선 |
+|---|---|
+| 대기 시간 과도 (72.5%) | KTX-513 평균 **18.5분 절약** (97개 실측) |
+| 시간 미스매치 (50.7%) | N\*=8 임계 **자동 확정** 통보 |
+| 택시비 부담 (46.4%) | **₩10,000/회 절약** (택시 ₩12k → 셔틀 ₩2k) |
+| 야간 단절 (39.1%) | 그리드 **22:10/23:30까지** 운영 |
+
+121 unit tests · TDD 기반 · 회귀 0건.
 
 ---
 
-## ✅ 남은 작업 체크리스트
-- [ ] (C) 예약 = "잠정/모집 중" 메시지 + 마감(cutoff) 개념
-- [ ] (A) `daily_dispatch(date)` — 단일 차량 제약(겹침/일 최대 K회) 반영해 실제 운행 확정
-- [ ] (B) 마감 시 확정/미운행 **카톡 알림** + 미운행 시 카풀 자동 연계
-- [ ] (B) BIS 키 승인 확인(현재 ACCESS DENIED) → 실시간 513 패널 활성화
-- [ ] (C) 메인 앱 HF/Render 배포 + (선택) 커스텀 도메인
-- [ ] 발표 자료·보고서 (모델·에이전트·데모·한계)
+## ⚠️ 한계 & Future Work
 
-자세한 현황은 [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) 참고.
+- **Cold-start data shortage** — demand estimated from a one-time survey, not accumulated reservation logs.
+- **No-show problem** — reservations may not convert to actual ridership, distorting the threshold decision.
+- **Simulation-based KPI** — no real operation yet.
+- **Operating parameters assumed** — per-trip cost (₩35,000), fare (₩2,000), capacity (12), fleet=1, driver model are external estimates rather than UNIST accounting.
+- **Small sample per slot** — 4 weekly observations per slot.
+- **Homogeneous students assumed** — single value-of-time and taxi/bus share.
+
+### Future Directions
+- 🚌 **Real-world pilot & A/B test** — deploy alongside current shuttle for one semester
+- 🛂 **No-show handling** — deposits, confirmation prompts, per-user reliability scores
+- 🧠 **ML demand forecasting** — upgrade EWMA with day-of-week and seasonal patterns
+- 🚍 **Multi-vehicle expansion** — fleet=1 → small bus pool for concurrent slots
+- 🚉 **2030 UNIST Station integration** — parallel short route absorbs idle time of the long route
+
+---
+
+## 📑 발표 자료
+
+- `docs/notebooks/operation_optimizer_agent.ipynb` — OR 모델 설계 노트북
+- `docs/ARCHITECTURE.md` — 아키텍처 상세
+- `docs/PROJECT_BRIEF.md` — 초기 기획서
+- 발표 슬라이드/영상 — *(추후 추가)*
+
+---
+
+## 👤 작성자
+
+**배재원** · UNIST 산업공학과 · IE209 생산운영관리 (2026-1)
+
+코드와 자료는 IE209 텀프로젝트 결과물이며, 비상업적 학습/포트폴리오 목적으로 공개됩니다.
+
+## 📄 License
+
+[MIT License](LICENSE)
